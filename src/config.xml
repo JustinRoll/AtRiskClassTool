@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<config>
+    <commands>
+        <maven_command>
+            mvn clean install -DskipTests
+        </maven_command>
+        <static_analysis_command>
+            mvn findbugs:findbugs
+        </static_analysis_command>
+    </commands>
+    <git_repo>
+        /Users/jroll/dev/thesis/qpid-java/client
+    </git_repo>
+</config>
