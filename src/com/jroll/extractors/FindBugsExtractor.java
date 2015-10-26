@@ -1,16 +1,13 @@
-package com.jroll.findbugs_extractor;
+package com.jroll.extractors;
 
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileReader;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.TreeMap;
 
 import com.jroll.exception.FindBugsException;
 import org.codehaus.plexus.util.xml.Xpp3Dom;
 import org.codehaus.plexus.util.xml.Xpp3DomBuilder;
-import org.codehaus.plexus.util.xml.pull.XmlPullParserException;
 
 /*
 checkout commit
@@ -22,7 +19,9 @@ Output the static analysis stuff
 /**
  * @goal stats
  */
-public class Extractor {
+public class FindBugsExtractor extends Extractor {
+
+
 
     /**
      * Where to read the findbugs stats from
@@ -38,6 +37,7 @@ public class Extractor {
         ArrayList<TreeMap> classProperties = new ArrayList<TreeMap>();
 
         if (findbugsChecks != null && findbugsChecks.exists()) {
+            System.out.println("file found");
             try {
                 Xpp3Dom dom = Xpp3DomBuilder.build(new FileReader(
                         findbugsChecks));
@@ -61,6 +61,7 @@ public class Extractor {
                     propertiesMap.put("classname", child.getChild("Class").getAttribute("classname"));
                     propertiesMap.put("classpath", child.getChild("Class").getChild("SourceLine").getAttribute("sourcepath"));
                     System.out.println(propertiesMap);
+                    classProperties.add(propertiesMap);
                     //<SourceLine start="57" classname="org.apache.qpid.client.AMQDestination" sourcepath="org/apache/qpid/client/AMQDestination.java" sourcefile="AMQDestination.java" end="1104">
 
                 }
