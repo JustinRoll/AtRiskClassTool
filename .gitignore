@@ -29,7 +29,7 @@ hs_err_pid*
 # .idea/tasks.xml
 # .idea/dictionaries
 
-# Sensitive or high-churn files:
+# Sensitive or high-churn changedFiles:
 # .idea/dataSources.ids
 # .idea/dataSources.xml
 # .idea/sqlDataSources.xml
@@ -47,7 +47,7 @@ hs_err_pid*
 *.ipr
 *.iws
 
-## Plugin-specific files:
+## Plugin-specific changedFiles:
 
 # IntelliJ
 /out/

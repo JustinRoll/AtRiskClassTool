@@ -11,7 +11,7 @@
         /Users/jroll/dev/thesis/qpid-java
     </git_repo>
     <jira_file>
-        qpid.csv
+        /Users/jroll/IdeaProjects/Thesis/src/master_sheet_excel.xls
     </jira_file>
-    <subproject>client</subproject>
+    <subproject>broker-core</subproject>
 </config>

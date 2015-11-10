@@ -21,7 +21,11 @@ Output the static analysis stuff
  */
 public class FindBugsExtractor extends Extractor {
 
+    public String xmlFile;
 
+public FindBugsExtractor(String dir) {
+    this.xmlFile = dir + "target/findbugsXml.xml";
+}
 
     /**
      * Where to read the findbugs stats from
@@ -60,7 +64,7 @@ public class FindBugsExtractor extends Extractor {
                     propertiesMap.put("rank", child.getAttribute("rank"));
                     propertiesMap.put("classname", child.getChild("Class").getAttribute("classname"));
                     propertiesMap.put("classpath", child.getChild("Class").getChild("SourceLine").getAttribute("sourcepath"));
-                    System.out.println(propertiesMap);
+                    //System.out.println(propertiesMap);
                     classProperties.add(propertiesMap);
                     //<SourceLine start="57" classname="org.apache.qpid.client.AMQDestination" sourcepath="org/apache/qpid/client/AMQDestination.java" sourcefile="AMQDestination.java" end="1104">
 
