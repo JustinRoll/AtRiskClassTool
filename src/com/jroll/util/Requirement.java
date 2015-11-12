@@ -3,6 +3,7 @@ package com.jroll.util;
 import sun.security.krb5.internal.Ticket;
 
 import java.io.Serializable;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 
@@ -18,6 +19,8 @@ public class Requirement implements Serializable {
     private ArrayList<GitMetadata> gitMetadatas;
     private ArrayList<String> currentFilesInRepo;
     private HashMap<String, String> jiraFields;
+    private LocalDateTime createDate;
+    private LocalDateTime lastCommitDate;
 
     public Requirement () {
 
@@ -53,5 +56,21 @@ public class Requirement implements Serializable {
 
     public void setCurrentFilesInRepo(ArrayList<String> currentFilesInRepo) {
         this.currentFilesInRepo = currentFilesInRepo;
+    }
+
+    public LocalDateTime getCreateDate() {
+        return createDate;
+    }
+
+    public void setCreateDate(LocalDateTime createDate) {
+        this.createDate = createDate;
+    }
+
+    public LocalDateTime getLastCommitDate() {
+        return lastCommitDate;
+    }
+
+    public void setLastCommitDate(LocalDateTime lastCommitDate) {
+        this.lastCommitDate = lastCommitDate;
     }
 }

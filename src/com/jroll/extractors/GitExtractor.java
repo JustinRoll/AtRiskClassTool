@@ -6,9 +6,11 @@ import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.diff.DiffFormatter;
 import org.eclipse.jgit.diff.RawTextComparator;
+import org.eclipse.jgit.errors.AmbiguousObjectException;
 import org.eclipse.jgit.lib.*;
 import org.eclipse.jgit.revwalk.DepthWalk;
 import org.eclipse.jgit.revwalk.RevCommit;
+import org.eclipse.jgit.revwalk.RevSort;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.treewalk.CanonicalTreeParser;
 import org.eclipse.jgit.treewalk.TreeWalk;
@@ -16,10 +18,10 @@ import org.eclipse.jgit.treewalk.filter.PathFilter;
 import org.eclipse.jgit.util.io.DisabledOutputStream;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.TreeMap;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.util.*;
 
 /**
  * Created by jroll on 9/27/15.
@@ -50,14 +52,13 @@ public class GitExtractor extends Extractor {
      * returned.
      *
      * @param repository
-     * @param path
      *            if unspecified, root folder is assumed.
      * @param commit
      *            if null, HEAD is assumed.
      * @return list of files in specified path
      */
     public static ArrayList<String> getAllFiles(Repository repository,
-                                                 RevCommit commit) throws Exception {
+                                                 RevCommit commit, HashMap<String, LocalDateTime> map) throws Exception {
         ArrayList<String> list = new ArrayList<String>();
 
         final TreeWalk tw = new TreeWalk(repository);
@@ -66,7 +67,16 @@ public class GitExtractor extends Extractor {
 
                 tw.setRecursive(true);
                 while (tw.next()) {
-                    list.add(getPathModel(tw, null, commit));
+                    String fName = getPathModel(tw, null, commit);
+                    list.add(fName);
+                    /* if (map.get(fName) == null) {
+                        map.put(fName, getCreationTime(fName, repository));
+                    } */
+                    LocalDateTime mappedTime = map.get(fName);
+                    LocalDateTime commitTime = getCommitTime(commit);
+                    if (mappedTime  == null || mappedTime.isAfter(commitTime)) {
+                        map.put(fName, commitTime);
+                    }
                 }
 
         } catch (IOException e) {
@@ -76,6 +86,10 @@ public class GitExtractor extends Extractor {
         }
         Collections.sort(list);
         return list;
+    }
+
+    public static LocalDateTime getCommitTime(RevCommit commit) {
+        return LocalDateTime.ofInstant(commit.getAuthorIdent().getWhen().toInstant(), ZoneId.systemDefault());
     }
 
 
@@ -150,18 +164,33 @@ public class GitExtractor extends Extractor {
         long size = 0;
         if (StringUtils.isEmpty(basePath)) {
             name = tw.getPathString();
+
         } else {
             name = tw.getPathString().substring(basePath.length() + 1);
         }
-        ObjectId objectId = tw.getObjectId(0);
+        /*ObjectId objectId = tw.getObjectId(0);
         try {
             if (!tw.isSubtree() && (tw.getFileMode(0) != FileMode.GITLINK)) {
                 size = tw.getObjectReader().getObjectSize(objectId, Constants.OBJ_BLOB);
+
             }
         } catch (Throwable t) {
             throw new Exception("failed to retrieve blob size for " + tw.getPathString());
-        }
+        } */
         return name;
+    }
+
+    /* Get creation date of the file. Pretty slow */
+    public static LocalDateTime getCreationTime(String fileName, Repository repository) throws IOException {
+        RevWalk revWalk = new RevWalk( repository );
+        revWalk.markStart(revWalk.parseCommit(repository.resolve(Constants.HEAD)));
+        revWalk.setTreeFilter(PathFilter.create(fileName));
+        System.out.println(fileName);
+        revWalk.sort( RevSort.COMMIT_TIME_DESC );
+        revWalk.sort(RevSort.REVERSE, true);
+        RevCommit commit = revWalk.next();
+        revWalk.dispose();
+        return commit == null ? null : LocalDateTime.ofInstant(commit.getAuthorIdent().getWhen().toInstant(), ZoneId.systemDefault());
     }
 
 
@@ -169,12 +198,6 @@ public class GitExtractor extends Extractor {
         return git.log()
                 .all()
                 .call();
-
-        /*count = 0;
-        for (RevCommit rev : logs) {
-            System.out.println("Commit: " + rev  + ", name: " + rev.getName() + ", id: " + rev.getId().getName() );
-            count++; */
-
         }
     }
 
