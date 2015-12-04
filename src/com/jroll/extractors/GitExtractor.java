@@ -163,10 +163,10 @@ public class GitExtractor extends Extractor {
         String name;
         long size = 0;
         if (StringUtils.isEmpty(basePath)) {
-            name = tw.getPathString();
+            name = tw.getPathString().intern();
 
         } else {
-            name = tw.getPathString().substring(basePath.length() + 1);
+            name = tw.getPathString().substring(basePath.length() + 1).intern();
         }
         /*ObjectId objectId = tw.getObjectId(0);
         try {

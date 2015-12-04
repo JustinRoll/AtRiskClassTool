@@ -7,7 +7,11 @@ import com.jroll.extractors.JiraExtractor;
 import com.jroll.util.CommitData;
 import com.jroll.util.GitMetadata;
 import com.jroll.util.Requirement;
+import org.apache.commons.configuration.ConfigurationException;
 import org.apache.commons.configuration.XMLConfiguration;
+import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.errors.CheckoutConflictException;
+import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.internal.storage.file.FileRepository;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
@@ -17,6 +21,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -34,6 +39,10 @@ public class MainDriver {
         CommitData data = gatherCommits();
         System.out.println("Commit Data Done");
         ArrayList<Requirement> reqs = new ArrayList<Requirement>();
+        String gitRepo = config.getString("git_repo");
+        String cpFix = "cp -r " + gitRepo + " /Users/jroll/Downloads/data/";
+        String staticAnalysis = config.getString("static_analysis_command");
+        TreeMap<String, String> fixVersions = new TreeMap<String, String>();
 
         for (HashMap<String, String> row : jiraRows) {
             String ticketId = row.get("Key").replaceAll("QPID-", "");
@@ -47,14 +56,53 @@ public class MainDriver {
 
                 req.setGitMetadatas(data.gitMetas.get(ticketId));
                 reqs.add(req);
+                String fixVersion = req.getJiraFields().get("Fix Version/s");
+                if (fixVersions.get(fixVersion) == null) {
+                    fixVersions.put(fixVersion, req.getGitMetadatas().get(0).getCommitId());
+                }
                 //System.out.println("Found a match");
         }
-            System.out.println("Finished Mapping Ticket Data to Commits");
+
 
             //Check to see if there is a ticket match
         }
-        serializeReqs(reqs, data.fileCommitDates);
+        serializeFixVersions(fixVersions);
+
+        analyzeCommits(fixVersions, config);
+        //serializeReqs(reqs, data.fileCommitDates);
         System.out.println("Serialization complete");
+    }
+
+    /* Serialize to file mapping first. Then export folder structure
+    * .24
+    * .28
+    * .34
+    * etc */
+    public static void serializeFixVersions(TreeMap<String, String> fixVersions) throws IOException, ConfigurationException, GitAPIException, InterruptedException {
+        PrintWriter fixWriter = new PrintWriter("fix.txt", "UTF-8");
+        /* initialize gitrepo. check out commit. copy over the fix directory to
+        a directory name of .24, .26
+         */
+        XMLConfiguration config = new XMLConfiguration("config.xml");
+        String gitRepo = config.getString("git_repo");
+        String cpFix = "cp -r " + gitRepo + " /Users/jroll/Downloads/data/";
+        String staticAnalysis = config.getString("static_analysis_command");
+        Repository localRepo = new FileRepository(gitRepo + "/.git");
+        Runtime rt = Runtime.getRuntime();
+
+        for (Map.Entry<String, String> fixVersion : fixVersions.entrySet()) {
+            Git git = new Git(localRepo);
+            git.checkout().setName(fixVersion.getValue()).call();
+
+            Process pr = rt.exec(cpFix + fixVersion.getKey(),
+                    null, new File(String.format("%s/", gitRepo)));
+            int exitCode = pr.waitFor();
+            System.out.printf("Done Fix Number:%s %d\n", fixVersion.getKey(), exitCode);
+            System.out.println(cpFix + fixVersion.getKey());
+
+            fixWriter.write(fixVersion.getKey() + "," + fixVersion.getValue() + "\n");
+        }
+        fixWriter.close();
     }
 
     public static LocalDateTime parseDateString(String text) {
@@ -72,45 +120,84 @@ public class MainDriver {
         return s.trim();
     }
 
+    public static String getExtension(String fileName) {
+        return fileName.substring(fileName.lastIndexOf(".") + 1, fileName.length());
+    }
+
     /* Filter out all files that were created AFTER the requirement time */
     public static Set<String> filterFiles(Requirement req, HashMap<String, LocalDateTime> map) {
         List<String> allFiles = new ArrayList<String>();
+        String JAVA = "java";
         for (GitMetadata meta : req.getGitMetadatas()) {
-            List<String> files = meta.getAllFiles().stream().filter(f -> !meta.getChangedFiles().contains(f) &&
+
+            List<String> files = meta.getAllFiles().stream().filter(f -> !meta.getChangedFiles().contains(f)
+                    && JAVA.equals(getExtension(f).toLowerCase()) &&
             req.getCreateDate().isAfter(map.get(f))).collect(Collectors.toList());
             allFiles.addAll(files);
         }
+        System.out.println(allFiles.size());
         return new HashSet<String>(allFiles);
     }
 
     public static Set<String> addChangedFiles(ArrayList<GitMetadata> commits) {
         ArrayList<String> fileList = new ArrayList<String>();
+
         for (GitMetadata commit : commits) {
-            fileList.addAll(commit.getChangedFiles());
+
+            fileList.addAll(commit.getChangedFiles().stream().filter(f -> "java".equals(getExtension(f))).collect(Collectors.toList()));
         }
         return new HashSet<String>(fileList);
+    }
+
+    public static LocalDateTime getLastCommitTime(ArrayList<GitMetadata> metas) {
+        LocalDateTime lastCommit = null;
+
+        for (GitMetadata meta : metas) {
+            if (lastCommit == null || meta.getCommitDate().isAfter(lastCommit)) {
+                lastCommit = meta.getCommitDate();
+            }
+        }
+        return lastCommit;
+    }
+
+    private static void serializeReq(Requirement req, PrintWriter writer, String lastCommit, String last10, int fid, int rid, int changed) {
+        //System.out.printf("%s||%s||%s||%s||%d", req.getId(), req.getGitMetadatas().get(0).getCommitId(), req.getJiraFields().get("Description"), file, 1);
+        writer.write(String.format("%s|%s|%s|%s|%s|%s|%s|%d|%d|%d\n", req.getId(), last10, req.getJiraFields().get("Fix Version/s"), req.getJiraFields().get("Issue Type"), lastCommit.toString(), req.getJiraFields().get("Created"), stringifyCommits(req.getGitMetadatas()),
+                fid, rid, 1));
     }
 
     private static void serializeReqs(ArrayList<Requirement> reqs, HashMap<String, LocalDateTime> map) throws FileNotFoundException, UnsupportedEncodingException {
         PrintWriter reqWriter = new PrintWriter("reqMap.txt", "UTF-8");
         PrintWriter fileWriter = new PrintWriter("fileMap.txt", "UTF-8");
-        PrintWriter writer = new PrintWriter("out.txt", "UTF-8");
-        writer.write("Ticket||Created||Commits||Requirement||File||Changed?\n");
+        PrintWriter writer = new PrintWriter("outOnlyReq.txt", "UTF-8");
+        PrintWriter bugWriter = new PrintWriter("bug.txt", "UTF-8");
+
+        writer.write("Ticket|Last 10|Fix Version|Issue Type|Last Commit Time|Req Created|Commits|File|Requirement|Changed?\n");
 
         int reqCount = 0;
         int fileCount = 0;
         HashMap<String, Integer> fileMap = new HashMap<String, Integer>();
         HashMap<String, Integer> reqMap = new HashMap<String, Integer>();
-        for (Requirement req : reqs) {
-            String reqText = req.getJiraFields().get("Description").replaceAll("\n", " ");
+        Queue<String> lastTickets = new ArrayBlockingQueue<String>(10);
+        Set<String> versions = new HashSet<String>();
 
+        for (Requirement req : reqs.stream().filter(r -> !"0.25".equals(r.getJiraFields().get("Fix Version/s").trim()))
+                .collect(Collectors.toList())) {
+            boolean bug = "Bug".equals(req.getJiraFields().get("Issue Type"));
+            String reqText = req.getJiraFields().get("Description").replaceAll("\n", " ");
+            LocalDateTime lastCommit = getLastCommitTime(req.getGitMetadatas());
+            String last10 = String.join(",", Arrays.asList(lastTickets.toArray(new String[10])).stream().filter(f -> f != null)
+                    .collect(Collectors.toList()));
             int rid = reqCount;
+
+            versions.add(req.getJiraFields().get("Fix Version/s"));
+
             for (String file : addChangedFiles(req.getGitMetadatas())) {
                 int fid = fileCount;
 
 
                 if (fileMap.get(file) != null) {
-                    fid = fileMap.get(file);
+                   fid = fileMap.get(file);
                 }
                 else {
                     fileMap.put(file, fileCount);
@@ -127,9 +214,7 @@ public class MainDriver {
 
                 }
 
-                //System.out.printf("%s||%s||%s||%s||%d", req.getId(), req.getGitMetadatas().get(0).getCommitId(), req.getJiraFields().get("Description"), file, 1);
-                writer.write(String.format("%s,%s,%s,%d,%d,%d\n", req.getId(), req.getJiraFields().get("Created"), stringifyCommits(req.getGitMetadatas()),
-                        fid, rid, 1));
+                serializeReq(req, bug?bugWriter:writer, lastCommit.toString(), last10, fid, rid, 1);
             }
 
 
@@ -146,12 +231,18 @@ public class MainDriver {
                     fileWriter.write(String.format("%d||%s\n", fileCount, file));
                     fileCount++;
                 }
-                       writer.write(String.format("%s,%s,%s,%d,%d,%d\n", req.getId(), req.getJiraFields().get("Created"),
-                               stringifyCommits(req.getGitMetadatas()),
-                               rid, fid, 0));
+                serializeReq(req, bug?bugWriter:writer, lastCommit.toString(), last10, fid, rid, 0);
             }
 
+            if (lastTickets.size() >= 10)
+                lastTickets.poll();
+            lastTickets.offer(req.getId());
         }
+
+        System.out.println(versions);
+        reqWriter.close();
+        fileWriter.close();
+        writer.close();
     }
 
     private static String getTicketId(String concreteLine) {
@@ -163,7 +254,6 @@ public class MainDriver {
         while (matcher.find()) {
             allMatches.add(matcher.group(1));
         }
-
 
         return allMatches.size() > 0 ? allMatches.get(0) : null;
     }
@@ -186,6 +276,7 @@ public class MainDriver {
 
      */
     public static CommitData gatherCommits () throws Exception {
+        int i = 0;
         XMLConfiguration config = new XMLConfiguration("config.xml");
         String gitRepo = config.getString("git_repo");
         String buildCommand = config.getString("build_command");
@@ -209,11 +300,14 @@ public class MainDriver {
             GitMetadata meta = new GitMetadata();
             meta.setAuthor(commit.getAuthorIdent().getName());
             meta.setCommitMessage(commit.getFullMessage());
-            meta.setCommitId(commit.getName());
+            meta.setCommitId(commit.getName().intern());
             meta.setCommitDate(LocalDateTime.ofInstant(commit.getAuthorIdent().getWhen().toInstant(), ZoneId.systemDefault()));
             meta.setChangedFiles(extractor.getChangedFiles(localRepo, commit));
             meta.setAllFiles(extractor.getAllFiles(localRepo, commit, fileCommitDates));
+            System.out.printf("Commit %d\n", i++);
 
+ //           if (i > 1000)
+ //               break;
             String ticketId = getTicketId(meta.getCommitMessage().toLowerCase());
 
             if (ticketId != null) {
@@ -229,17 +323,41 @@ public class MainDriver {
         return new CommitData(gitMetas, fileCommitDates);
     }
 
-    public static void performStaticAnalysis(GitExtractor extractor, RevCommit commit, Runtime rt, String buildCommand,
-                                             String gitRepo, String subProject, String staticAnalysis, GitMetadata meta,
-                                             FindBugsExtractor ex) throws Exception {
-        System.out.println(commit.getCommitTime());
-        System.out.println(commit.getAuthorIdent().getName());
-        System.out.println("checking out commit");
-        System.out.println(commit.getName());
-        System.out.printf("Parents:%d\n", commit.getParentCount());
-        System.out.println("Commit date: " + commit.getAuthorIdent().getWhen());
-        extractor.checkout(commit);
 
+    public static void analyzeCommits(TreeMap<String, String> fixVersions, XMLConfiguration config) throws Exception {
+        String gitRepo = config.getString("git_repo");
+        String buildCommand = config.getString("build_command");
+        String staticAnalysis = config.getString("static_analysis_command");
+        String subProject = config.getString("subproject");
+        Repository localRepo = new FileRepository(gitRepo + "/.git");
+        Runtime rt = Runtime.getRuntime();
+        FindBugsExtractor ex = new FindBugsExtractor(subProject);
+        GitExtractor extractor = new GitExtractor((localRepo));
+        Git git = new Git(localRepo);
+        TreeMap<String, ArrayList<TreeMap>> statics = new TreeMap<String, ArrayList<TreeMap>>();
+
+        for (Map.Entry<String, String> fixVersion : fixVersions.entrySet()) {
+            statics.put(fixVersion.getKey(), analyzeCommit(git, fixVersion.getValue(), rt, buildCommand, gitRepo, subProject, staticAnalysis, ex));
+        }
+        serializeStatic(statics);
+    }
+
+    private static void serializeStatic(TreeMap<String, ArrayList<TreeMap>> treeMaps) throws FileNotFoundException {
+        PrintWriter writer = new PrintWriter("statics.txt");
+        for (Map.Entry<String, ArrayList<TreeMap>> entry : treeMaps.entrySet()) {
+            for (TreeMap row : entry.getValue()) {
+                writer.write(String.format("%s, %s,%s,%s,%s\n", entry.getKey(), row.get("category"), row.get("classname"), row.get("classpath"), row.get("rank")));
+            }
+        }
+    }
+
+    /* perform static analysis for a single commit */
+    public static ArrayList<TreeMap> analyzeCommit(Git git, String commit, Runtime rt, String buildCommand,
+                                             String gitRepo, String subProject, String staticAnalysis,
+                                             FindBugsExtractor ex) throws Exception {
+
+        System.out.println("checking out commit");
+        git.checkout().setName(commit).call();
 
         Process pr = rt.exec(buildCommand, null, new File(String.format("%s/", gitRepo)));
         printOutput(pr);
@@ -251,7 +369,7 @@ public class MainDriver {
         printOutput(pr2);
 
         exitCode = pr2.waitFor();
-        meta.setStaticMetrics(ex.execute(new File(ex.xmlFile)));
+        return ex.execute(new File(ex.xmlFile));
     }
 
     public static String parseFindBugs(FindBugsExtractor ex) throws FindBugsException {
