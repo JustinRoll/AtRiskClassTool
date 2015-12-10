@@ -31,7 +31,31 @@ import java.util.stream.Collectors;
  */
 public class MainDriver {
 
+    public static TreeMap<String, String> readFile() throws IOException {
+        File file = new File("fix.txt");
+        BufferedReader reader = null;
+        TreeMap<String, String> commitMap = new TreeMap<String, String>();
+
+        reader = new BufferedReader(new FileReader(file));
+        String text = null;
+
+        while ((text = reader.readLine()) != null) {
+            String[] line = text.split(",");
+            if (line.length == 2) {
+                commitMap.put(line[0], line[1]);
+            }
+        }
+
+        return commitMap;
+
+    }
+
     public static void main(String[] args) throws Exception {
+        XMLConfiguration config = new XMLConfiguration("config.xml");
+        TreeMap<String, String> fixVersions = readFile();
+        analyzeCommits(fixVersions, config);
+    }
+    public static void oldmain(String[] args) throws Exception {
         XMLConfiguration config = new XMLConfiguration("config.xml");
         List<HashMap<String, String>> jiraRows = JiraExtractor.parseExcel(config.getString("jira_file"));
         System.out.println("Jira Data Done");
@@ -331,14 +355,19 @@ public class MainDriver {
         String subProject = config.getString("subproject");
         Repository localRepo = new FileRepository(gitRepo + "/.git");
         Runtime rt = Runtime.getRuntime();
-        FindBugsExtractor ex = new FindBugsExtractor(subProject);
+        FindBugsExtractor ex = new FindBugsExtractor(gitRepo + "/" + subProject);
         GitExtractor extractor = new GitExtractor((localRepo));
         Git git = new Git(localRepo);
         TreeMap<String, ArrayList<TreeMap>> statics = new TreeMap<String, ArrayList<TreeMap>>();
 
         for (Map.Entry<String, String> fixVersion : fixVersions.entrySet()) {
-            statics.put(fixVersion.getKey(), analyzeCommit(git, fixVersion.getValue(), rt, buildCommand, gitRepo, subProject, staticAnalysis, ex));
+            ArrayList<TreeMap> metrics = analyzeCommit(git, fixVersion.getValue(), rt, buildCommand, gitRepo, subProject, staticAnalysis, ex);
+            System.out.println("metrics");
+            System.out.println(metrics);
+            statics.put(fixVersion.getKey(), metrics);
         }
+        System.out.println("static metrics");
+        System.out.println(statics);
         serializeStatic(statics);
     }
 

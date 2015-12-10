@@ -24,7 +24,7 @@ public class FindBugsExtractor extends Extractor {
     public String xmlFile;
 
 public FindBugsExtractor(String dir) {
-    this.xmlFile = dir + "target/findbugsXml.xml";
+    this.xmlFile = dir + "/target/findbugsXml.xml";
 }
 
     /**
@@ -86,6 +86,9 @@ public FindBugsExtractor(String dir) {
                 throw new FindBugsException(
                         "Findbugs checks file missing", e);
             }
+        }
+        else {
+            System.out.println("static file not exists");
         }
     return classProperties;
     }
