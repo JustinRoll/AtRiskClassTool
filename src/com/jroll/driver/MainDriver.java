@@ -4,13 +4,11 @@ import com.jroll.exception.FindBugsException;
 import com.jroll.extractors.FindBugsExtractor;
 import com.jroll.extractors.GitExtractor;
 import com.jroll.extractors.JiraExtractor;
-import com.jroll.util.CommitData;
-import com.jroll.util.GitMetadata;
-import com.jroll.util.Requirement;
+import com.jroll.util.*;
+import gr.spinellis.ckjm.ClassMetrics;
 import org.apache.commons.configuration.ConfigurationException;
 import org.apache.commons.configuration.XMLConfiguration;
 import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.api.errors.CheckoutConflictException;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.internal.storage.file.FileRepository;
 import org.eclipse.jgit.lib.Repository;
@@ -26,13 +24,16 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static com.jroll.util.CKJMUtil.parseData;
+import static com.jroll.util.CustomFileUtil.findAllFilesWithExtension;
+
 /**
  * Created by jroll on 9/28/15.
  */
 public class MainDriver {
 
-    public static TreeMap<String, String> readFile() throws IOException {
-        File file = new File("fix.txt");
+    public static TreeMap<String, String> readFile(String fileName, String delimiter) throws IOException {
+        File file = new File(fileName);
         BufferedReader reader = null;
         TreeMap<String, String> commitMap = new TreeMap<String, String>();
 
@@ -40,8 +41,10 @@ public class MainDriver {
         String text = null;
 
         while ((text = reader.readLine()) != null) {
-            String[] line = text.split(",");
-            if (line.length == 2) {
+
+            String[] line = text.split(delimiter);
+
+            if (line.length >= 1) {
                 commitMap.put(line[0], line[1]);
             }
         }
@@ -50,11 +53,238 @@ public class MainDriver {
 
     }
 
+    /* read statics, run cloc metrics, read cloc metrics, read/run dependency info */
+    public static TreeMap<String, Integer> readClocFile(String fileName) throws IOException {
+        File file = new File(fileName);
+        BufferedReader reader = null;
+        TreeMap<String, Integer> commitMap = new TreeMap<String, Integer>();
+
+        reader = new BufferedReader(new FileReader(file));
+        String text = null;
+        text = reader.readLine();
+
+        while ((text = reader.readLine()) != null) {
+            String[] line = text.split(",");
+            if (line.length >= 5 && line[0].toLowerCase().equals("java") && line[1].contains("org/apache/qpid")) {
+                commitMap.put(line[1].substring(line[1].indexOf("org/apache/qpid")), Integer.parseInt(line[4]));
+            }
+            else {
+                System.out.println("bad class at " + line[1]);
+            }
+        }
+
+        return commitMap;
+
+    }
+
+
+    public static TreeMap<String, TreeMap<String, Integer>> readStatics(String fileName) throws IOException {
+        File file = new File(fileName);
+        BufferedReader reader = null;
+
+        TreeMap<String, TreeMap<String, Integer>> classStatics = new TreeMap<String, TreeMap<String, Integer>>();
+
+        /*
+           Map of fix version to map of classes with count of stuff
+         */
+
+        reader = new BufferedReader(new FileReader(file));
+        String text = null;
+
+        while ((text = reader.readLine()) != null) {
+            String[] line = text.split(",");
+            System.out.println(line);
+            if (line.length >= 4 && !line[1].contains("SECURITY")) {
+                if (classStatics.get(line[0]) == null) {
+                    classStatics.put(line[0], new TreeMap<String, Integer>());
+                }
+                TreeMap<String, Integer> bugMap = classStatics.get(line[0]);
+                if (bugMap.get(line[3]) == null) {
+                    bugMap.put(line[3], 1);
+                }
+                else {
+                    bugMap.put(line[3], bugMap.get(line[3]) + 1);
+                }
+            }
+        }
+        System.out.println(classStatics);
+        return classStatics;
+
+    }
+
+
+    public static TreeMap<String, ClassData> runStaticMetrics(XMLConfiguration config) throws Exception {
+
+        TreeMap<String, String> fixVersions = readFile("fix.txt", "\\|");
+        System.out.println(fixVersions);
+        return analyzeCommits(fixVersions, config);
+    }
+
     public static void main(String[] args) throws Exception {
         XMLConfiguration config = new XMLConfiguration("config.xml");
-        TreeMap<String, String> fixVersions = readFile();
-        analyzeCommits(fixVersions, config);
+        TreeMap<String, ClassData> fixToClassData = runStaticMetrics(config);
+        runBigTable(fixToClassData);
+        ARFFGenerator.convertFile("bigTable.txt", "bigTable.arff");
+        //oldmain(args);
     }
+
+    public static Map<String, ClassMetrics> readDependencies(String repo) throws Exception {
+        Set<String> files = new HashSet<String>();
+        findAllFilesWithExtension(".class", new File(repo).listFiles(), files);
+
+        Map<String, ClassMetrics> fileMetrics = parseData(files);
+
+        return fileMetrics;
+    }
+
+    public static String trimCustom(String inputPath, String replaceString) {
+        int index = inputPath.indexOf(replaceString);
+        return index >= 0 ? inputPath.substring(index) : inputPath;
+    }
+
+    public static int getStaticCount(String fixName, String className, TreeMap<String, TreeMap<String, Integer>> staticCount) {
+        if (staticCount == null || className == null || staticCount == null)
+            return 0;
+        else if (staticCount.get(fixName) != null && staticCount.get(fixName).get(className) != null) {
+            return staticCount.get(fixName).get(className);
+        }
+        return 0;
+    }
+
+
+    public static TreeMap<String, TreeMap<String, Double>> readVsm(File file) throws IOException {
+        BufferedReader reader = null;
+        TreeMap<String, TreeMap<String, Double>> lines = new TreeMap<String, TreeMap<String, Double>>();
+
+        reader = new BufferedReader(new FileReader(file));
+        String text = null;
+        String[] header = reader.readLine().split(",");
+
+        while ((text = reader.readLine()) != null) {
+            String[] line = text.split(",");
+            if (lines.get(line[0]) == null) {
+                TreeMap<String, Double> map = new TreeMap<String, Double>();
+                lines.put(line[1], map);
+                for (int i = 2; i < line.length; i++) {
+                    map.put(header[i], Double.parseDouble(line[i]));
+                }
+            }
+        }
+        return lines;
+    }
+
+    public static void runBigTable(TreeMap<String, ClassData> fixToClassData) throws Exception {
+        XMLConfiguration config = new XMLConfiguration("config.xml");
+
+        TreeMap<String, TreeMap<String, Integer>> staticMap = readStatics("statics2.txt");
+        TreeMap<String, Integer> frequencyMap = new TreeMap<String, Integer>();
+
+        //This field will map a class to its frequency of change
+        float ticketCount = 0.0f;
+        String prevTicket = null;
+        PrintWriter writer = new PrintWriter("bigTable.txt");
+
+
+        File file = new File("outOnlyReq.txt");
+        File sims = new File("ReqSimilarity_12.csv");
+        TreeMap<String, TreeMap<String, Double>> scores = readVsm(sims);
+
+        BufferedReader reader = null;
+        TreeMap<String, String> commitMap = new TreeMap<String, String>();
+        HashMap<String, Integer> headerMap = new HashMap<String, Integer>();
+        TreeMap<String, String> fileMap = readFile("fileMap.txt", "\\|\\|");
+        TreeMap<String, String> trimmedFileMap = new TreeMap<String, String>();
+
+        for (Map.Entry<String, String> entry : fileMap.entrySet()) {
+            trimmedFileMap.put(entry.getKey(), trimCustom(entry.getValue(), "org/apache"));
+        }
+        System.out.println(fileMap.toString() + " file map");
+        System.out.println(trimmedFileMap.toString() + " trimmed file map");
+        reader = new BufferedReader(new FileReader(file));
+        String[] header = reader.readLine().split("|");
+
+        for (int i = 0; i < header.length; i++) {
+            headerMap.put(header[i], i);
+        }
+        String text = null;
+
+        String ckjmHeader = "ckjm_noc\tckjm_wmc\tckjm_rfc\tckjm_cbo\tckjm_dit\tckjm_lcom\tckjm_ca\tckjm_npm";
+
+        String HEADER = "Ticket\tLast 10\tFix Version\tIssue Type\tLast Commit Time\tReq Created\tCommits\tFile\tRequirement\tBugCount\tChangeHistory\t";
+        HEADER += "Vsm_MaxSimilarity\tVsm_AverSimilarity\tJsd_MaxSimilarity\tJsd_AverSimilarity\tCmJcn_MaxSimilarity\tCmJcn_AverSimilarity\tGreedyRes_MaxSimilarity\tGreedyRes_AverSimilarity\tBleuLinMaxSimilarity\tBleuLin_AverSimilarity\tOptWup_MaxSimilarity\tOptWup_AverSimilarity\t";
+        HEADER += ckjmHeader;
+        HEADER += "\tloc\t";
+        HEADER += "Changed?\n";
+        writer.write(HEADER);
+
+        int count = 0;
+        while ((text = reader.readLine()) != null) {
+            count++;
+            String[] line = text.replaceAll("\t", " ").split("\\|");
+            String fix = line[2];
+            System.out.println(fix);
+            ClassData currentFix = fixToClassData.get(fix);
+
+
+            if (!line[0].equals(prevTicket)) {
+                ticketCount++;
+            }
+            prevTicket = line[0];
+
+            String className = trimmedFileMap.get(line[7]);
+            Integer freq = frequencyMap.get(className) == null ? 0 : frequencyMap.get(className);
+            if (line[9].trim().equals("1")) {
+                frequencyMap.put(className, freq + 1);
+                System.out.println(line[0] + " " + line[7] + "freq increase");
+            }
+            else {
+                System.out.println(line[0] + " " + line[7] + " freq same");
+            }
+            int staticCount = getStaticCount(line[2], className, staticMap);
+            String last10 = line[1].replaceAll(",", " ");
+            String firstFields = String.format("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%.5f\t", line[0], last10, line[2].replaceAll(",", "|"), line[3], line[4], line[5], line[6], line[7], line[8], staticCount, Math.min(1.0, freq / ticketCount));
+            String[] lsmHeader = "Vsm_MaxSimilarity,Vsm_AverSimilarity,Jsd_MaxSimilarity,Jsd_AverSimilarity,CmJcn_MaxSimilarity,CmJcn_AverSimilarity,GreedyRes_MaxSimilarity,GreedyRes_AverSimilarity,BleuLinMaxSimilarity,BleuLin_AverSimilarity,OptWup_MaxSimilarity,OptWup_AverSimilarity".split(",");
+            System.out.println(fixToClassData);
+            System.out.println(currentFix);
+            ClassMetrics cm = currentFix.getCkjmMetrics().get(className.replaceAll(".java", "").replaceAll("/", "."));
+            Integer loc = currentFix.getLinesOfCode().get(className);
+            System.out.println(className);
+            String ckjmMetrics = "";
+            if (cm != null) {
+                ckjmMetrics += String.format("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d", cm.getNoc(),
+                        cm.getWmc(), cm.getRfc(), cm.getCbo(), cm.getDit(), cm.getLcom(), cm.getCa(), cm.getNpm());
+                System.out.println("found class data!");
+            }
+            else {
+                //"ckjm_noc\tckjm_wmc\tckjm_rfc\tckjm_cbo\tckjm_dit\tckjm_lcom\tckjm_ca\tckjm_npm";
+                ckjmMetrics += "-1\t-1\t-1\t-1\t-1\t-1\t-1\t-1";
+            }
+            ckjmMetrics += String.format("\t%d", loc != null ? loc : -1);
+
+            for (int i = 0; i < 12; i++) {
+                firstFields += String.format("% .5f\t", scores.get(line[0]).get(lsmHeader[i]));
+            }
+            firstFields += ckjmMetrics;
+            firstFields +=String.format("\t%s\n", line[9].equals("1") ? "y" : "n");
+            /*
+            Vsm_MaxSimilarity,Vsm_AverSimilarity,Jsd_MaxSimilarity,Jsd_AverSimilarity,CmJcn_MaxSimilarity,CmJcn_AverSimilarity,GreedyRes_MaxSimilarity,GreedyRes_AverSimilarity,BleuLinMaxSimilarity,BleuLin_AverSimilarity,OptWup_MaxSimilarity,OptWup_AverSimilarity
+             */
+            //Ticket|Last 10|Fix Version|Issue Type|Last Commit Time|Req Created|Commits|File|Requirement|BugCount|ChangeHistory|Changed?
+            if (trimmedFileMap.get(line[7]).contains("qpid") && loc != null && loc > 0 && cm != null) {
+                writer.write(firstFields);
+            }
+        }
+        writer.flush();
+        writer.close();
+
+    }
+
+    /*
+        Get numbers of times the current class has changed
+        Filter out stuff that doesn't include org.apache.qpid
+            -
+     */
+
     public static void oldmain(String[] args) throws Exception {
         XMLConfiguration config = new XMLConfiguration("config.xml");
         List<HashMap<String, String>> jiraRows = JiraExtractor.parseExcel(config.getString("jira_file"));
@@ -90,10 +320,10 @@ public class MainDriver {
 
             //Check to see if there is a ticket match
         }
-        serializeFixVersions(fixVersions);
+        //serializeFixVersions(fixVersions);
 
         analyzeCommits(fixVersions, config);
-        //serializeReqs(reqs, data.fileCommitDates);
+        serializeReqs(reqs, data.fileCommitDates);
         System.out.println("Serialization complete");
     }
 
@@ -187,7 +417,7 @@ public class MainDriver {
     private static void serializeReq(Requirement req, PrintWriter writer, String lastCommit, String last10, int fid, int rid, int changed) {
         //System.out.printf("%s||%s||%s||%s||%d", req.getId(), req.getGitMetadatas().get(0).getCommitId(), req.getJiraFields().get("Description"), file, 1);
         writer.write(String.format("%s|%s|%s|%s|%s|%s|%s|%d|%d|%d\n", req.getId(), last10, req.getJiraFields().get("Fix Version/s"), req.getJiraFields().get("Issue Type"), lastCommit.toString(), req.getJiraFields().get("Created"), stringifyCommits(req.getGitMetadatas()),
-                fid, rid, 1));
+                fid, rid, changed));
     }
 
     private static void serializeReqs(ArrayList<Requirement> reqs, HashMap<String, LocalDateTime> map) throws FileNotFoundException, UnsupportedEncodingException {
@@ -348,7 +578,7 @@ public class MainDriver {
     }
 
 
-    public static void analyzeCommits(TreeMap<String, String> fixVersions, XMLConfiguration config) throws Exception {
+    public static TreeMap<String, ClassData> analyzeCommits(TreeMap<String, String> fixVersions, XMLConfiguration config) throws Exception {
         String gitRepo = config.getString("git_repo");
         String buildCommand = config.getString("build_command");
         String staticAnalysis = config.getString("static_analysis_command");
@@ -358,47 +588,80 @@ public class MainDriver {
         FindBugsExtractor ex = new FindBugsExtractor(gitRepo + "/" + subProject);
         GitExtractor extractor = new GitExtractor((localRepo));
         Git git = new Git(localRepo);
-        TreeMap<String, ArrayList<TreeMap>> statics = new TreeMap<String, ArrayList<TreeMap>>();
+        TreeMap<String, ClassData> statics = new TreeMap<String, ClassData>();
+        int i = 0;
+
 
         for (Map.Entry<String, String> fixVersion : fixVersions.entrySet()) {
-            ArrayList<TreeMap> metrics = analyzeCommit(git, fixVersion.getValue(), rt, buildCommand, gitRepo, subProject, staticAnalysis, ex);
+            System.out.printf("Fix:%s Commit:%s\n", fixVersion.getKey(), fixVersion.getValue());
+            ClassData  metrics = analyzeCommit(git, fixVersion.getValue(), rt, config, ex);
             System.out.println("metrics");
             System.out.println(metrics);
             statics.put(fixVersion.getKey(), metrics);
         }
         System.out.println("static metrics");
-        System.out.println(statics);
-        serializeStatic(statics);
+        //System.out.println(statics);
+        //serializeStatic(statics);
+        return statics;
     }
 
-    private static void serializeStatic(TreeMap<String, ArrayList<TreeMap>> treeMaps) throws FileNotFoundException {
+    private static void serializeStatic(TreeMap<String, ClassData> treeMapList) throws FileNotFoundException {
         PrintWriter writer = new PrintWriter("statics.txt");
-        for (Map.Entry<String, ArrayList<TreeMap>> entry : treeMaps.entrySet()) {
-            for (TreeMap row : entry.getValue()) {
-                writer.write(String.format("%s, %s,%s,%s,%s\n", entry.getKey(), row.get("category"), row.get("classname"), row.get("classpath"), row.get("rank")));
+        for (Map.Entry<String, ClassData> entry : treeMapList.entrySet()) {
+            for (ArrayList<TreeMap> treeMaps : entry.getValue().getStaticMetrics()) {
+                for (TreeMap row : treeMaps) {
+                    writer.write(String.format("%s, %s,%s,%s,%s\n", entry.getKey(), row.get("category"), row.get("classname"), row.get("classpath"), row.get("rank")));
+                }
             }
         }
     }
 
     /* perform static analysis for a single commit */
-    public static ArrayList<TreeMap> analyzeCommit(Git git, String commit, Runtime rt, String buildCommand,
-                                             String gitRepo, String subProject, String staticAnalysis,
+    public static ClassData analyzeCommit(Git git, String commit, Runtime rt, XMLConfiguration config,
                                              FindBugsExtractor ex) throws Exception {
+        ArrayList<ArrayList <TreeMap>> finalMap = new ArrayList<ArrayList <TreeMap>>();
+        String gitRepo = config.getString("git_repo");
+        String staticAnalysis = config.getString("staticAnalysis");
+        ClassData data = new ClassData();
 
         System.out.println("checking out commit");
         git.checkout().setName(commit).call();
 
-        Process pr = rt.exec(buildCommand, null, new File(String.format("%s/", gitRepo)));
+        Process pr = rt.exec(config.getString("build_command"), null, new File(String.format("%s/", gitRepo)));
         printOutput(pr);
         int exitCode = pr.waitFor();
-        System.out.println("now performing static analysis");
-        System.out.println(ex.xmlFile);
 
-        Process pr2 = rt.exec(staticAnalysis, null, new File(String.format("%s/%s/", gitRepo, subProject)));
-        printOutput(pr2);
+        Process clocPr = rt.exec(config.getString("cloc_command"), null, new File(String.format("%s/", gitRepo)));
+        printOutput(pr);
+        exitCode = pr.waitFor();
+        TreeMap<String, Integer> clocs = readClocFile(config.getString("cloc_file"));
+        data.setLinesOfCode(clocs);
+        Map<String, ClassMetrics> ckjmMap = readDependencies(gitRepo);
+        data.setCkjmMetrics(ckjmMap);
 
-        exitCode = pr2.waitFor();
-        return ex.execute(new File(ex.xmlFile));
+        //now perform the cloc steps and the dependency steps
+
+
+        //ArrayList<File> xmls = CustomFileUtil.findFileSub(gitRepo, "target", "findBugsXml.xml");
+        /* for each subdirectory
+        * run the maven script. check the findbugsxml
+
+        File[] directories = new File(gitRepo).listFiles(File::isDirectory);
+        for (File dir : directories) {
+            System.out.println("now performing static analysis");
+            System.out.println(dir.toString());
+
+
+            Process pr2 = rt.exec(staticAnalysis, null, dir);
+            printOutput(pr2);
+            File xml = CustomFileUtil.findFileInSub(dir, "target", "findBugsXml.xml");
+            System.out.println(xml);
+            exitCode = pr2.waitFor();
+            if (xml != null)
+                finalMap.add(ex.execute(xml));
+        }*/
+        data.setStaticMetrics(finalMap);
+        return data;
     }
 
     public static String parseFindBugs(FindBugsExtractor ex) throws FindBugsException {

@@ -1,12 +1,21 @@
 package com.jroll.util;
 
+import org.apache.commons.collections4.bidimap.AbstractDualBidiMap;
 import weka.core.*;
+import weka.core.converters.ArffSaver;
+import weka.core.converters.CSVLoader;
 import weka.filters.unsupervised.attribute.StringToWordVector;
+
+import java.io.File;
+import java.util.*;
 
 /**
  * Created by jroll on 10/24/15.
  */
 public class FeatureUtil {
+
+
+
 
     public static Double computeRequirementSimilarities(String requirements1, String requirements2) {
         /*StringVectorizer sv = StringToWordVector();
@@ -48,5 +57,19 @@ public class FeatureUtil {
         ed.setDontNormalize(true);
         Double wDist1 = ed.distance(firstInstance, secondInstance);*/
         return 4.0;
+    }
+
+    public static Set<String> getLabels(List<HashMap<String, Object>> featureList) {
+        Set<String> labelList = new HashSet<String>();
+        for (HashMap<String, Object> featureMap : featureList ) {
+            String label = (String) featureMap.get("label");
+            if (label != null)
+                labelList.add(label);
+        }
+        return labelList;
+    }
+
+    public static ArrayList<String> getFeatureNames(List<HashMap<String, Object>> featureList) {
+        return null;
     }
 }
