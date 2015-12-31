@@ -1,4 +1,4 @@
-package com.jroll.util;
+package com.jroll.data;
 
 import gr.spinellis.ckjm.ClassMetrics;
 

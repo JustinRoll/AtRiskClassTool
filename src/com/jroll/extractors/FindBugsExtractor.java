@@ -3,6 +3,7 @@ package com.jroll.extractors;
 import java.io.File;
 import java.io.FileReader;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.TreeMap;
 
 import com.jroll.exception.FindBugsException;
@@ -23,8 +24,8 @@ public class FindBugsExtractor extends Extractor {
 
     public String xmlFile;
 
-public FindBugsExtractor(String dir) {
-    this.xmlFile = dir + "/target/findbugsXml.xml";
+public FindBugsExtractor(String dir, String findBugsRelative) {
+    this.xmlFile = dir + findBugsRelative;
 }
 
     /**
@@ -91,5 +92,22 @@ public FindBugsExtractor(String dir) {
             System.out.println("static file not exists");
         }
     return classProperties;
+    }
+
+    public String parseFindBugs() throws FindBugsException {
+        List<TreeMap> rows = execute(new File(this.xmlFile));
+        System.out.println("commit, category, classname, classpath, rank");
+
+        String str = "";
+
+        for (TreeMap row : rows) {
+            str += getRow(row, "HEAD");
+        }
+
+        return str;
+    }
+
+    public static String getRow(TreeMap<String, String> row, String commit) {
+        return String.format("%s, %s,%s,%s,%s\n", commit, row.get("category"), row.get("classname"), row.get("classpath"), row.get("rank"));
     }
 }

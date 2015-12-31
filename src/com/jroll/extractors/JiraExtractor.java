@@ -1,9 +1,7 @@
 package com.jroll.extractors;
 
-import com.jroll.util.Ticket;
+import com.jroll.data.Ticket;
 import com.opencsv.CSVReader;
-import com.opencsv.bean.ColumnPositionMappingStrategy;
-import com.opencsv.bean.CsvToBean;
 import com.opencsv.bean.HeaderColumnNameTranslateMappingStrategy;
 import jxl.Cell;
 import jxl.Sheet;
@@ -15,8 +13,6 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 
 /**
  * Created by jroll on 9/27/15.
@@ -59,7 +55,7 @@ public class JiraExtractor extends Extractor {
         Sheet sheet = workbook.getSheet(1);
         int numCols = 83;
         int row = 1;
-        String[] header = new String[83];
+        String[] header = new String[numCols];
         ArrayList<HashMap<String, String>> rowList = new ArrayList<HashMap<String, String>>();
 
         for (int i = 0; i < numCols; i++) {

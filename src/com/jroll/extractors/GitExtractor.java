@@ -1,5 +1,7 @@
 package com.jroll.extractors;
 
+import com.jroll.data.GitMetadata;
+import com.jroll.data.Requirement;
 import org.codehaus.plexus.util.StringUtils;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.GitAPIException;
@@ -22,6 +24,9 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
+
+import static com.jroll.util.CustomFileUtil.getExtension;
 
 /**
  * Created by jroll on 9/27/15.
@@ -199,5 +204,48 @@ public class GitExtractor extends Extractor {
                 .all()
                 .call();
         }
+
+    public static Set<String> addChangedFiles(ArrayList<GitMetadata> commits) {
+        ArrayList<String> fileList = new ArrayList<String>();
+
+        for (GitMetadata commit : commits) {
+
+            fileList.addAll(commit.getChangedFiles().stream().filter(f -> "java".equals(getExtension(f))).collect(Collectors.toList()));
+        }
+        return new HashSet<String>(fileList);
+    }
+
+    public static LocalDateTime getLastCommitTime(ArrayList<GitMetadata> metas) {
+        LocalDateTime lastCommit = null;
+
+        for (GitMetadata meta : metas) {
+            if (lastCommit == null || meta.getCommitDate().isAfter(lastCommit)) {
+                lastCommit = meta.getCommitDate();
+            }
+        }
+        return lastCommit;
+    }
+
+
+    /* Filter out all files that were created AFTER the requirement time */
+    public static Set<String> filterFiles(Requirement req, HashMap<String, LocalDateTime> map) {
+        Set<String> allFiles = new HashSet<String>();
+        Set<String> changedFiles = new HashSet<String>();
+        String JAVA = "java";
+
+        for (GitMetadata meta : req.getGitMetadatas()) {
+            //System.out.println(meta.getChangedFiles());
+            //System.out.println(meta.getAllFiles());
+
+            List<String> files = meta.getAllFiles().stream().filter(f -> JAVA.equals(getExtension(f).toLowerCase()) &&
+                    req.getCreateDate().isAfter(map.get(f))).collect(Collectors.toList());
+            allFiles.addAll(files);
+            changedFiles.addAll(meta.getChangedFiles());
+        }
+
+        System.out.println(allFiles.size());
+        return new HashSet<String>(allFiles.stream().filter(f -> !changedFiles.contains(f)).collect(Collectors.toList()));
+    }
+
     }
 

@@ -1,5 +1,6 @@
-package com.jroll.util;
+package com.jroll.data;
 
+import com.jroll.data.GitMetadata;
 import sun.security.krb5.internal.Ticket;
 
 import java.io.Serializable;

@@ -1,4 +1,4 @@
-package com.jroll.util;
+package com.jroll.data;
 
 /**
  * Created by jroll on 11/4/15.

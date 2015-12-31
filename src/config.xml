@@ -13,11 +13,35 @@
         <cloc_file>
             /Users/jroll/IdeaProjects/Thesis/src/cloc.csv
         </cloc_file>
+        <req_file>
+            out_only_req.txt
+        </req_file>
+        <fix_file>
+            fix.txt
+        </fix_file>
+        <final_out_table>
+            big_table.txt
+        </final_out_table>
+    <final_out_arff>
+        big_table.arff
+    </final_out_arff>
+    <find_bugs_relative>
+        /target/findbugsXml.xml
+    </find_bugs_relative>
     <git_repo>
         /Users/jroll/dev/thesis/qpid-java
     </git_repo>
     <jira_file>
         /Users/jroll/IdeaProjects/Thesis/src/master_sheet_excel.xls
     </jira_file>
-    <subproject>broker-core</subproject>
+    <req_limit>
+        0
+    </req_limit>
+    <similarity_file>
+        ReqSimilarity_12.csv
+    </similarity_file>
+    <statics_file>
+        statics.txt
+    </statics_file>
+
 </config>
