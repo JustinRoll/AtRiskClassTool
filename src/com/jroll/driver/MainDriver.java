@@ -9,29 +9,29 @@ import com.jroll.extractors.GitExtractor;
 import com.jroll.extractors.JiraExtractor;
 import com.jroll.util.*;
 import gr.spinellis.ckjm.ClassMetrics;
-import org.apache.commons.configuration.ConfigurationException;
 import org.apache.commons.configuration.XMLConfiguration;
 import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.internal.storage.file.FileRepository;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
+import org.kohsuke.args4j.Argument;
+import org.kohsuke.args4j.CmdLineException;
+import org.kohsuke.args4j.CmdLineParser;
+import org.kohsuke.args4j.Option;
 
 import java.io.*;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 import static com.jroll.command.CommandExecutor.printOutput;
-import static com.jroll.util.CKJMUtil.parseData;
-import static com.jroll.util.CustomFileUtil.findAllFilesWithExtension;
-import static com.jroll.util.CustomFileUtil.getExtension;
-import static com.jroll.util.CustomFileUtil.trimCustom;
+import static com.jroll.util.CKJMUtil.readDependencies;
+import static com.jroll.util.CustomFileUtil.*;
+import static com.jroll.util.ReportUtil.tabulate_report;
+import static com.jroll.util.TextParser.getTicketIdQpid;
+import static com.jroll.util.TextParser.parseDateString;
+import static org.kohsuke.args4j.ExampleMode.ALL;
 
 /**
  * Created by jroll on 9/28/15.
@@ -39,34 +39,123 @@ import static com.jroll.util.CustomFileUtil.trimCustom;
 public class MainDriver {
 
 
+    @Option(name="-reqnum",usage="number of different requirements to process")
+    private int reqNum = -1;
+
+    @Option(name="-config",usage="config file to open",metaVar="OUTPUT")
+    private String configFile;
+
+    // receives other command line parameters than options
+    @Argument
+    private List<String> operations = new ArrayList<String>();
+
+    private String RUN_REQS = "reqs";
+    private String RUN_JIRA = "jira";
+    private String RUN_QUALITY_REPORT = "report";
+    private String ANALYZE_COMMITS = "commits";
+    private String RUN_SIMILARITY = "similarity";
+    private String RUN_DUMB_BIGTABLE = "dumb";
+    private String RUN_BIGTABLE = "big";
+    private String RUN_ARFF = "arff";
+
+    FinalConfig config;
 
 
 
+    public TreeMap<String, ClassData> runStaticMetrics() throws Exception {
 
-    public static TreeMap<String, ClassData> runStaticMetrics(XMLConfiguration config) throws Exception {
-
-        TreeMap<String, String> fixVersions = CustomFileUtil.readFile("fix.txt", "\\|");
+        TreeMap<String, String> fixVersions = CustomFileUtil.readFile(config.fixFile, "\\|");
         System.out.println(fixVersions);
-        return analyzeCommits(fixVersions, config);
+        return analyzeCommits(fixVersions);
     }
 
     public static void main(String[] args) throws Exception {
-        XMLConfiguration config = new XMLConfiguration("config.xml");
-        //TreeMap<String, ClassData> fixToClassData = runStaticMetrics(config);
-        //runBigTable(fixToClassData);
-        //ARFFGenerator.convertFile("bigTableRandom.txt", "bigTableRandom.arff");
-        oldmain(args);
+        new MainDriver().doMain(args);
+
 
     }
 
-    public static Map<String, ClassMetrics> readDependencies(String repo) throws Exception {
-        Set<String> files = new HashSet<String>();
-        findAllFilesWithExtension(".class", new File(repo).listFiles(), files);
+    public  void parse(String[] args) {
+        CmdLineParser parser = new CmdLineParser(this);
 
-        Map<String, ClassMetrics> fileMetrics = parseData(files);
+        // if you have a wider console, you could increase the value;
+        // here 80 is also the default
+        parser.setUsageWidth(80);
 
-        return fileMetrics;
+        try {
+            // parse the arguments.
+            parser.parseArgument(args);
+
+            // you can parse additional arguments if you want.
+            // parser.parseArgument("more","args");
+
+            // after parsing arguments, you should check
+            // if enough arguments are given.
+            if( operations.isEmpty() )
+                throw new CmdLineException(parser,"No operation is given");
+
+        } catch( CmdLineException e ) {
+            // if there's a problem in the command line,
+            // you'll get this exception. this will report
+            // an error message.
+            System.err.println(e.getMessage());
+            System.err.println("java predictor [options...] arguments...");
+            // print the list of available options
+            parser.printUsage(System.err);
+            System.err.println();
+
+            // print option sample. This is useful some time
+            System.err.println("  Example: java predictor"+parser.printExample(ALL));
+
+            return;
+        }
     }
+    public void doMain(String[] args) throws Exception {
+        parse(args);
+        XMLConfiguration initialConfig = new XMLConfiguration(configFile);
+        config = new FinalConfig(initialConfig);
+        Serializer serializer = new Serializer(config);
+
+        if(operations.contains(RUN_JIRA)) {
+            /* open the git repo. Get the date of the first commit in the repo. Pass that into the pull
+            JiraDataDirectory
+             */
+            Repository repo = new FileRepository(config.gitRepo + "/.git");
+            LocalDateTime firstCommitDate = GitExtractor.getFirstCommitTime(repo);
+
+            JiraExtractor.pullJiraData(config.jiraFile, config.jiraDirectory, config.jiraUrl, firstCommitDate.toLocalDate());
+        }
+
+        if (operations.contains(RUN_QUALITY_REPORT)) {
+            tabulate_report(config);
+
+        }
+        if (operations.contains(RUN_REQS)) {
+            analyzeReqs();
+
+        }
+
+        if (operations.contains(RUN_DUMB_BIGTABLE) || operations.contains(RUN_BIGTABLE)) {
+
+            TreeMap<String, ClassData> fixToClassData = runStaticMetrics();
+            if (operations.contains(RUN_DUMB_BIGTABLE)) {
+                System.out.println("Running DUMB big table routine...");
+                serializer.runBigTableDumb(fixToClassData);
+            }
+            else {
+                serializer.runBigTable(fixToClassData);
+            }
+
+        }
+
+        if (operations.contains(RUN_ARFF)) {
+            System.out.println("Running ARFF routine...");
+            serializer.convertArff();
+        }
+
+
+    }
+
 
 
 
@@ -90,17 +179,18 @@ public class MainDriver {
             -
      */
 
-    public static void oldmain(String[] args) throws Exception {
-        XMLConfiguration config = new XMLConfiguration("config.xml");
-        List<HashMap<String, String>> jiraRows = JiraExtractor.parseExcel(config.getString("jira_file"));
+    public  void analyzeReqs() throws Exception {
+
+        Serializer s = new Serializer(config);
+        List<HashMap<String, String>> jiraRows = JiraExtractor.parseExcel(config.jiraFile);
         System.out.println("Jira Data Done");
         /* Gather all commit data */
         CommitData data = gatherCommits();
         System.out.println("Commit Data Done");
         ArrayList<Requirement> reqs = new ArrayList<Requirement>();
-        String gitRepo = config.getString("git_repo");
-        String cpFix = "cp -r " + gitRepo + " /Users/jroll/Downloads/data/";
-        String staticAnalysis = config.getString("static_analysis_command");
+
+        String cpFix = "cp -r " + config.gitRepo + " " + config.fixDataDirectory;
+
         TreeMap<String, String> fixVersions = new TreeMap<String, String>();
 
         for (HashMap<String, String> row : jiraRows) {
@@ -125,10 +215,10 @@ public class MainDriver {
 
             //Check to see if there is a ticket match
         }
-        //serializeFixVersions(fixVersions);
+        s.serializeFixVersions(fixVersions);
 
-        //analyzeCommits(fixVersions, config);
-        serializeReqs(reqs, data.fileCommitDates);
+        analyzeCommits(fixVersions);
+        s.serializeReqs(reqs, data.fileCommitDates);
         System.out.println("Serialization complete");
     }
 
@@ -153,21 +243,17 @@ public class MainDriver {
 
 
      */
-    public static CommitData gatherCommits () throws Exception {
+    public CommitData gatherCommits () throws Exception {
         int i = 0;
-        XMLConfiguration config = new XMLConfiguration("config.xml");
-        String gitRepo = config.getString("git_repo");
-        String buildCommand = config.getString("build_command");
-        String staticAnalysis = config.getString("static_analysis_command");
-        String subProject = config.getString("subproject");
-        Repository localRepo = new FileRepository(gitRepo + "/.git");
+
+        Repository localRepo = new FileRepository(config.gitRepo + "/.git");
         Runtime rt = Runtime.getRuntime();
         HashMap<String, ArrayList<GitMetadata>> gitMetas = new HashMap<String, ArrayList<GitMetadata>>();
         HashMap<String, LocalDateTime> fileCommitDates = new HashMap<String, LocalDateTime>();
 
-        FindBugsExtractor ex = new FindBugsExtractor(String.format("%s/%s/", gitRepo, subProject));
+        FindBugsExtractor ex = new FindBugsExtractor(String.format("%s/%s/", config.gitRepo, config.subProject), config.findBugsRelative);
 
-        rt.exec("rm " + gitRepo + "/.git/index.lock");
+        rt.exec("rm " + config.gitRepo + "/.git/index.lock");
 
         GitExtractor extractor = new GitExtractor(localRepo);
         Iterable<RevCommit> commits = extractor.getAllCommits();
@@ -186,7 +272,7 @@ public class MainDriver {
 
            //if (i > 500)
            //     break;
-            String ticketId = getTicketId(meta.getCommitMessage().toLowerCase());
+            String ticketId = getTicketIdQpid(meta.getCommitMessage().toLowerCase());
 
             if (ticketId != null) {
                 if (gitMetas.get(ticketId) == null) {
@@ -202,14 +288,10 @@ public class MainDriver {
     }
 
 
-    public static TreeMap<String, ClassData> analyzeCommits(TreeMap<String, String> fixVersions, XMLConfiguration config) throws Exception {
-        String gitRepo = config.getString("git_repo");
-        String buildCommand = config.getString("build_command");
-        String staticAnalysis = config.getString("static_analysis_command");
-        String subProject = config.getString("subproject");
-        Repository localRepo = new FileRepository(gitRepo + "/.git");
+    public  TreeMap<String, ClassData> analyzeCommits(TreeMap<String, String> fixVersions) throws Exception {
+        Repository localRepo = new FileRepository(config.gitRepo + "/.git");
         Runtime rt = Runtime.getRuntime();
-        FindBugsExtractor ex = new FindBugsExtractor(gitRepo + "/" + subProject, config.getString("find_bugs_relative"));
+        FindBugsExtractor ex = new FindBugsExtractor(config.gitRepo + "/" + config.subProject, config.findBugsRelative);
         GitExtractor extractor = new GitExtractor((localRepo));
         Git git = new Git(localRepo);
         TreeMap<String, ClassData> statics = new TreeMap<String, ClassData>();
@@ -218,7 +300,7 @@ public class MainDriver {
 
         for (Map.Entry<String, String> fixVersion : fixVersions.entrySet()) {
             System.out.printf("Fix:%s Commit:%s\n", fixVersion.getKey(), fixVersion.getValue());
-            ClassData  metrics = analyzeCommit(git, fixVersion.getValue(), rt, config, ex);
+            ClassData  metrics = analyzeCommit(git, fixVersion.getValue(), rt, ex);
             System.out.println("metrics");
             System.out.println(metrics);
             statics.put(fixVersion.getKey(), metrics);
@@ -232,26 +314,25 @@ public class MainDriver {
 
 
     /* perform static analysis for a single commit */
-    public static ClassData analyzeCommit(Git git, String commit, Runtime rt, XMLConfiguration config,
+    public ClassData analyzeCommit(Git git, String commit, Runtime rt,
                                              FindBugsExtractor ex) throws Exception {
         ArrayList<ArrayList <TreeMap>> finalMap = new ArrayList<ArrayList <TreeMap>>();
-        String gitRepo = config.getString("git_repo");
-        String staticAnalysis = config.getString("staticAnalysis");
+
         ClassData data = new ClassData();
 
         System.out.println("checking out commit");
         git.checkout().setName(commit).call();
 
-        Process pr = rt.exec(config.getString("build_command"), null, new File(String.format("%s/", gitRepo)));
+        Process pr = rt.exec(config.buildCommand, null, new File(String.format("%s/", config.gitRepo)));
         printOutput(pr);
         int exitCode = pr.waitFor();
 
-        Process clocPr = rt.exec(config.getString("cloc_command"), null, new File(String.format("%s/", gitRepo)));
+        Process clocPr = rt.exec(config.clocCommand, null, new File(String.format("%s/", config.gitRepo)));
         printOutput(pr);
         exitCode = pr.waitFor();
-        TreeMap<String, Integer> clocs = readClocFile(config.getString("cloc_file"));
+        TreeMap<String, Integer> clocs = readClocFile(config.clocFile);
         data.setLinesOfCode(clocs);
-        Map<String, ClassMetrics> ckjmMap = readDependencies(gitRepo);
+        Map<String, ClassMetrics> ckjmMap = readDependencies(config.gitRepo);
         data.setCkjmMetrics(ckjmMap);
 
         //now perform the cloc steps and the dependency steps
@@ -278,11 +359,4 @@ public class MainDriver {
         data.setStaticMetrics(finalMap);
         return data;
     }
-
-
-
-
-
-
-
 }

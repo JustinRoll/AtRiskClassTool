@@ -6,11 +6,11 @@ import gr.spinellis.ckjm.ClassVisitor;
 import org.apache.bcel.classfile.ClassParser;
 import org.apache.bcel.classfile.JavaClass;
 
+import java.io.File;
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeMap;
+import java.util.*;
+
+import static com.jroll.util.CustomFileUtil.findAllFilesWithExtension;
 
 /**
  * Created by jroll on 12/20/15.
@@ -72,4 +72,14 @@ public class CKJMUtil {
         return cm.m;
 
     }
+
+    public static Map<String, ClassMetrics> readDependencies(String repo) throws Exception {
+        Set<String> files = new HashSet<String>();
+        findAllFilesWithExtension(".class", new File(repo).listFiles(), files);
+
+        Map<String, ClassMetrics> fileMetrics = parseData(files);
+
+        return fileMetrics;
+    }
+
 }

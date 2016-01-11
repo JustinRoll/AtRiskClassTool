@@ -9,6 +9,7 @@ import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.diff.DiffFormatter;
 import org.eclipse.jgit.diff.RawTextComparator;
 import org.eclipse.jgit.errors.AmbiguousObjectException;
+import org.eclipse.jgit.internal.storage.file.FileRepository;
 import org.eclipse.jgit.lib.*;
 import org.eclipse.jgit.revwalk.DepthWalk;
 import org.eclipse.jgit.revwalk.RevCommit;
@@ -50,6 +51,8 @@ public class GitExtractor extends Extractor {
 
         return treeMap;
     }
+
+
 
     /**
      * Returns the list of files in the specified folder at the specified
@@ -95,6 +98,20 @@ public class GitExtractor extends Extractor {
 
     public static LocalDateTime getCommitTime(RevCommit commit) {
         return LocalDateTime.ofInstant(commit.getAuthorIdent().getWhen().toInstant(), ZoneId.systemDefault());
+    }
+
+    public static LocalDateTime getFirstCommitTime(Repository repo) throws IOException {
+        RevWalk rw = new RevWalk(repo);
+        RevCommit c = null;
+        AnyObjectId headId;
+        headId = repo.resolve(Constants.HEAD);
+        RevCommit headCommit = rw.parseCommit(headId);
+
+        rw.sort(RevSort.REVERSE);
+        rw.markStart(headCommit);
+        RevCommit oldest = rw.next();
+
+        return LocalDateTime.ofInstant(oldest.getAuthorIdent().getWhen().toInstant(), ZoneId.systemDefault());
     }
 
 

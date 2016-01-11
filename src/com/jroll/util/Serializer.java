@@ -17,6 +17,11 @@ import java.util.*;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.stream.Collectors;
 
+import static com.jroll.driver.MainDriver.getStaticCount;
+import static com.jroll.extractors.GitExtractor.addChangedFiles;
+import static com.jroll.extractors.GitExtractor.filterFiles;
+import static com.jroll.extractors.GitExtractor.getLastCommitTime;
+import static com.jroll.util.CustomFileUtil.readStatics;
 import static com.jroll.util.CustomFileUtil.trimCustom;
 
 /**
@@ -24,17 +29,23 @@ import static com.jroll.util.CustomFileUtil.trimCustom;
  */
 public class Serializer {
 
-    private static void serializeReq(Requirement req, PrintWriter writer, String lastCommit, String last10, int fid, int rid, int changed) {
+    FinalConfig config;
+
+    public Serializer(FinalConfig config) {
+        this.config = config;
+    }
+
+    public static void serializeReq(Requirement req, PrintWriter writer, String lastCommit, String last10, int fid, int rid, int changed) {
         //System.out.printf("%s||%s||%s||%s||%d", req.getId(), req.getGitMetadatas().get(0).getCommitId(), req.getJiraFields().get("Description"), file, 1);
         writer.write(String.format("%s|%s|%s|%s|%s|%s|%s|%d|%d|%d\n", req.getId(), last10, req.getJiraFields().get("Fix Version/s"), req.getJiraFields().get("Issue Type"), lastCommit.toString(), req.getJiraFields().get("Created"), stringifyCommits(req.getGitMetadatas()),
                 fid, rid, changed));
     }
 
-    private static void serializeReqs(ArrayList<Requirement> reqs, HashMap<String, LocalDateTime> map) throws FileNotFoundException, UnsupportedEncodingException {
-        PrintWriter reqWriter = new PrintWriter("reqMap.txt", "UTF-8");
-        PrintWriter fileWriter = new PrintWriter("fileMap.txt", "UTF-8");
-        PrintWriter writer = new PrintWriter("outOnlyReq.txt", "UTF-8");
-        PrintWriter bugWriter = new PrintWriter("bug.txt", "UTF-8");
+    public void serializeReqs(ArrayList<Requirement> reqs, HashMap<String, LocalDateTime> map) throws FileNotFoundException, UnsupportedEncodingException {
+        PrintWriter reqWriter = new PrintWriter(config.reqMap, "UTF-8");
+        PrintWriter fileWriter = new PrintWriter(config.fileMap, "UTF-8");
+        PrintWriter writer = new PrintWriter(config.outReqFile, "UTF-8");
+        PrintWriter bugWriter = new PrintWriter(config.bugFile, "UTF-8");
 
         writer.write("Ticket|Last 10 Touched|Fix Version|Issue Type|Last Commit Time|Req Created|Commits|File|Requirement|Changed?\n");
 
@@ -129,8 +140,8 @@ public class Serializer {
         writer.close();
     }
 
-    private static void serializeStatic(TreeMap<String, ClassData> treeMapList) throws FileNotFoundException {
-        PrintWriter writer = new PrintWriter("statics.txt");
+    public  void serializeStatic(TreeMap<String, ClassData> treeMapList) throws FileNotFoundException {
+        PrintWriter writer = new PrintWriter(config.staticsFile);
         for (Map.Entry<String, ClassData> entry : treeMapList.entrySet()) {
             for (ArrayList<TreeMap> treeMaps : entry.getValue().getStaticMetrics()) {
                 for (TreeMap row : treeMaps) {
@@ -141,7 +152,7 @@ public class Serializer {
     }
 
 
-    private static String stringifyCommits(ArrayList<GitMetadata> metas) {
+    public static String stringifyCommits(ArrayList<GitMetadata> metas) {
         String s = "";
         for (GitMetadata meta : metas) {
             s += meta.getCommitId();
@@ -155,16 +166,14 @@ public class Serializer {
 * .28
 * .34
 * etc */
-    public static void serializeFixVersions(TreeMap<String, String> fixVersions) throws IOException, ConfigurationException, GitAPIException, InterruptedException {
+    public void serializeFixVersions(TreeMap<String, String> fixVersions) throws IOException, ConfigurationException, GitAPIException, InterruptedException {
         PrintWriter fixWriter = new PrintWriter("fix.txt", "UTF-8");
         /* initialize gitrepo. check out commit. copy over the fix directory to
         a directory name of .24, .26
          */
-        XMLConfiguration config = new XMLConfiguration("config.xml");
-        String gitRepo = config.getString("git_repo");
-        String cpFix = "cp -r " + gitRepo + " /Users/jroll/Downloads/data/";
-        String staticAnalysis = config.getString("static_analysis_command");
-        Repository localRepo = new FileRepository(gitRepo + "/.git");
+
+        String cpFix = "cp -r " + config.gitRepo + config.fixDataDirectory;
+        Repository localRepo = new FileRepository(config.gitRepo + "/.git");
         Runtime rt = Runtime.getRuntime();
 
         for (Map.Entry<String, String> fixVersion : fixVersions.entrySet()) {
@@ -172,7 +181,7 @@ public class Serializer {
             git.checkout().setName(fixVersion.getValue()).call();
 
             Process pr = rt.exec(cpFix + fixVersion.getKey(),
-                    null, new File(String.format("%s/", gitRepo)));
+                    null, new File(String.format("%s/", config.gitRepo)));
             int exitCode = pr.waitFor();
             System.out.printf("Done Fix Number:%s %d\n", fixVersion.getKey(), exitCode);
             System.out.println(cpFix + fixVersion.getKey());
@@ -182,26 +191,25 @@ public class Serializer {
         fixWriter.close();
     }
 
-    public static void runBigTable(TreeMap<String, ClassData> fixToClassData) throws Exception {
-        XMLConfiguration config = new XMLConfiguration("config.xml");
+    public void runBigTable(TreeMap<String, ClassData> fixToClassData) throws Exception {
 
-        TreeMap<String, TreeMap<String, Integer>> staticMap = readStatics("statics2.txt");
+        TreeMap<String, TreeMap<String, Integer>> staticMap = readStatics(config.staticsFile);
         TreeMap<String, Integer> frequencyMap = new TreeMap<String, Integer>();
 
         //This field will map a class to its frequency of change
         float ticketCount = 0.0f;
         String prevTicket = null;
-        PrintWriter writer = new PrintWriter("bigTable.txt");
+        PrintWriter writer = new PrintWriter(config.finalOutTable);
 
 
-        File file = new File("outOnlyReq.txt");
-        File sims = new File("ReqSimilarity_12.csv");
+        File file = new File(config.reqMap);
+        File sims = new File(config.similarityFile);
         TreeMap<String, TreeMap<String, Double>> scores = CustomFileUtil.readVsm(sims);
 
         BufferedReader reader = null;
         TreeMap<String, String> commitMap = new TreeMap<String, String>();
         HashMap<String, Integer> headerMap = new HashMap<String, Integer>();
-        TreeMap<String, String> fileMap = CustomFileUtil.readFile("fileMap.txt", "\\|\\|");
+        TreeMap<String, String> fileMap = CustomFileUtil.readFile(config.fileMap, "\\|\\|");
         TreeMap<String, String> trimmedFileMap = new TreeMap<String, String>();
 
         for (Map.Entry<String, String> entry : fileMap.entrySet()) {
@@ -262,7 +270,7 @@ public class Serializer {
             if (cm != null) {
                 ckjmMetrics += String.format("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d", cm.getNoc(),
                         cm.getWmc(), cm.getRfc(), cm.getCbo(), cm.getDit(), cm.getLcom(), cm.getCa(), cm.getNpm());
-                System.out.println("found class data!");
+
             }
             else {
                 //"ckjm_noc\tckjm_wmc\tckjm_rfc\tckjm_cbo\tckjm_dit\tckjm_lcom\tckjm_ca\tckjm_npm";
@@ -288,5 +296,124 @@ public class Serializer {
 
     }
 
+    /* for this method, we will just open up each similarity file and tack on the columns to our output file */
+    public void runBigTableDumb(TreeMap<String, ClassData> fixToClassData) throws Exception {
+        String currentReqLine = null;
+        String currentCodeLine = null;
+        TreeMap<String, TreeMap<String, Integer>> staticMap = readStatics(config.staticsFile);
+        TreeMap<String, Integer> frequencyMap = new TreeMap<String, Integer>();
 
+        //This field will map a class to its frequency of change
+        float ticketCount = 0.0f;
+        String prevTicket = null;
+        PrintWriter writer = new PrintWriter(config.finalOutTable);
+
+
+        File file = new File(config.outReqFile);
+        File reqSims = new File(config.reqSimilarity);
+        File codeSims = new File(config.codeSimilarity);
+
+        BufferedReader reader = null;
+        BufferedReader reqSimReader = new BufferedReader(new FileReader(reqSims));
+        BufferedReader codeSimReader = new BufferedReader(new FileReader(codeSims));
+
+        TreeMap<String, String> commitMap = new TreeMap<String, String>();
+        HashMap<String, Integer> headerMap = new HashMap<String, Integer>();
+        TreeMap<String, String> fileMap = CustomFileUtil.readFile(config.fileMap, "\\|\\|");
+        TreeMap<String, String> trimmedFileMap = new TreeMap<String, String>();
+
+        for (Map.Entry<String, String> entry : fileMap.entrySet()) {
+            trimmedFileMap.put(entry.getKey(), trimCustom(entry.getValue(), "org/apache"));
+            //change this to use a filter
+        }
+        System.out.println(fileMap.toString() + " file map");
+        System.out.println(trimmedFileMap.toString() + " trimmed file map");
+        reader = new BufferedReader(new FileReader(file));
+        String[] mainHeader = reader.readLine().split("|");
+        String[] vsmHeader = reqSimReader.readLine().split(",");
+        String[] codeSimHeader = codeSimReader.readLine().split(",");
+
+        for (int i = 0; i < mainHeader.length; i++) {
+            headerMap.put(mainHeader[i], i);
+        }
+        String text = null;
+
+        String ckjmHeader = "ckjm_noc\tckjm_wmc\tckjm_rfc\tckjm_cbo\tckjm_dit\tckjm_lcom\tckjm_ca\tckjm_npm";
+
+        String HEADER = "Ticket\tLast 10\tFix Version\tIssue Type\tLast Commit Time\tReq Created\tCommits\tFile\tRequirement\tBugCount\tChangeHistory\t";
+        HEADER += String.join("\t", vsmHeader);
+        HEADER += "\t" + String.join("\t", codeSimHeader);
+        HEADER += "\t" + ckjmHeader;
+        HEADER += "\tloc\t";
+        HEADER += "Changed?\n";
+        writer.write(HEADER);
+
+        int count = 0;
+        while ((text = reader.readLine()) != null && (currentCodeLine = codeSimReader.readLine()) != null && (currentReqLine = reqSimReader.readLine()) != null) {
+            count++;
+            String[] line = text.replaceAll("\t", " ").split("\\|");
+            String fix = line[2];
+
+            ClassData currentFix = fixToClassData.get(fix);
+
+
+            if (!line[0].equals(prevTicket)) {
+                ticketCount++;
+            }
+            prevTicket = line[0];
+
+            String className = trimmedFileMap.get(line[7]);
+            Integer freq = frequencyMap.get(className) == null ? 0 : frequencyMap.get(className);
+            if (line[9].trim().equals("1")) {
+                frequencyMap.put(className, freq + 1);
+                //System.out.println(line[0] + " " + line[7] + "freq increase");
+            }
+            else {
+                //System.out.println(line[0] + " " + line[7] + " freq same");
+            }
+            int staticCount = getStaticCount(line[2], className, staticMap);
+            String last10 = line[1].replaceAll(",", " ");
+            String firstFields = String.format("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%.5f\t", line[0], last10, line[2].replaceAll(",", "|"), line[3], line[4], line[5], line[6], line[7], line[8], staticCount, Math.min(1.0, freq / ticketCount));
+
+
+            ClassMetrics cm = currentFix.getCkjmMetrics().get(className.replaceAll(".java", "").replaceAll("/", "."));
+            Integer loc = currentFix.getLinesOfCode().get(className);
+            //System.out.println(className);
+            String ckjmMetrics = "";
+            if (cm != null) {
+                ckjmMetrics += String.format("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d", cm.getNoc(),
+                        cm.getWmc(), cm.getRfc(), cm.getCbo(), cm.getDit(), cm.getLcom(), cm.getCa(), cm.getNpm());
+
+            }
+            else {
+                //"ckjm_noc\tckjm_wmc\tckjm_rfc\tckjm_cbo\tckjm_dit\tckjm_lcom\tckjm_ca\tckjm_npm";
+                ckjmMetrics += "-1\t-1\t-1\t-1\t-1\t-1\t-1\t-1";
+            }
+            ckjmMetrics += String.format("\t%d", loc != null ? loc : -1);
+            String[] reqs = currentReqLine.split(",");
+            for (int i = 0; i < reqs.length; i++) {
+                firstFields += String.format("%s\t", reqs[i]);
+            }
+            for (String codeSim : currentCodeLine.split(",")) {
+                firstFields += String.format("%s\t", codeSim);
+            }
+            firstFields += ckjmMetrics;
+            firstFields +=String.format("\t%s\n", line[9].equals("1") ? "y" : "n");
+            /*
+            Vsm_MaxSimilarity,Vsm_AverSimilarity,Jsd_MaxSimilarity,Jsd_AverSimilarity,CmJcn_MaxSimilarity,CmJcn_AverSimilarity,GreedyRes_MaxSimilarity,GreedyRes_AverSimilarity,BleuLinMaxSimilarity,BleuLin_AverSimilarity,OptWup_MaxSimilarity,OptWup_AverSimilarity
+             */
+            //Ticket|Last 10|Fix Version|Issue Type|Last Commit Time|Req Created|Commits|File|Requirement|BugCount|ChangeHistory|Changed?
+            if (trimmedFileMap.get(line[7]).contains("qpid") && loc != null && loc > 0 && cm != null) {
+                writer.write(firstFields);
+            }
+        }
+        writer.flush();
+        writer.close();
+
+    }
+
+
+    public void convertArff() throws Exception {
+        ARFFGenerator.convertFile(config.finalOutTable, config.finalOutArff);
+    }
 }

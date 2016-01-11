@@ -19,10 +19,25 @@ public class TextParser {
     }
 
 
-    private static String getTicketId(String concreteLine) {
+    public static String getTicketIdQpid(String concreteLine) {
         List<String> allMatches = new ArrayList<String>();
 
         Pattern pattern = Pattern.compile(".*qpid-([0-9]+).*");
+        Matcher matcher = pattern.matcher(concreteLine);
+
+        while (matcher.find()) {
+            allMatches.add(matcher.group(1));
+        }
+
+        return allMatches.size() > 0 ? allMatches.get(0) : null;
+    }
+
+    public static String getTicketId(String concreteLine) {
+        List<String> allMatches = new ArrayList<String>();
+
+        System.out.println("testing");
+        System.out.println(concreteLine);
+        Pattern pattern = Pattern.compile(".*-([0-9]+).*");
         Matcher matcher = pattern.matcher(concreteLine);
 
         while (matcher.find()) {

@@ -1,5 +1,6 @@
 package com.jroll.extractors;
 
+import com.jroll.command.CommandExecutor;
 import com.jroll.data.Ticket;
 import com.opencsv.CSVReader;
 import com.opencsv.bean.HeaderColumnNameTranslateMappingStrategy;
@@ -11,8 +12,10 @@ import jxl.read.biff.BiffException;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.TreeMap;
 
 /**
  * Created by jroll on 9/27/15.
@@ -21,8 +24,13 @@ import java.util.HashMap;
 public class JiraExtractor extends Extractor {
 
 
+    public static void pullJiraData(String fileName, String file_dir, String jira_url, LocalDate startDate) throws IOException, InterruptedException {
+        String command = String.format("python jira_data.py %s %s %s %d-%d-%d", fileName, file_dir, jira_url, startDate.getYear(), startDate.getMonth().getValue(), startDate.getDayOfMonth());
+        System.out.println(command);
+        System.out.println(CommandExecutor.runCommand(command, "/Users/jroll/IdeaProjects/Thesis/src"));
+    }
 
-    public static ArrayList<HashMap<String, String>> parseCSVToMap(String fileName) throws IOException {
+    public static ArrayList<TreeMap<String, String>> parseCSVToMap(String fileName) throws IOException {
 
         HeaderColumnNameTranslateMappingStrategy<Ticket> beanStrategy = new HeaderColumnNameTranslateMappingStrategy<Ticket>();
         beanStrategy.setType(Ticket.class);
@@ -31,11 +39,11 @@ public class JiraExtractor extends Extractor {
         //List<String[]> content = csvReader.readAll();
         String[] header = csvReader.readNext();
         String[] row = csvReader.readNext();
-        ArrayList<HashMap<String, String>> rowList = new ArrayList<HashMap<String, String>>();
+        ArrayList<TreeMap<String, String>> rowList = new ArrayList<TreeMap<String, String>>();
 
         while (row != null) {
             int colIndex = 0;
-            HashMap<String, String> rowMap = new HashMap<String, String>();
+            TreeMap<String, String> rowMap = new TreeMap<String, String>();
             for (String col : row) {
                 rowMap.put(header[colIndex], col);
                 //System.out.println(header[colIndex]);
