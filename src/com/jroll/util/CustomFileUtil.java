@@ -126,10 +126,11 @@ public class CustomFileUtil {
     }
 
     /* read statics, run cloc metrics, read cloc metrics, read/run dependency info */
-    public static TreeMap<String, Integer> readClocFile(String fileName) throws IOException {
+    public static TreeMap<String, Integer> readClocFile(String project, String fileName) throws IOException {
         File file = new File(fileName);
         BufferedReader reader = null;
         TreeMap<String, Integer> commitMap = new TreeMap<String, Integer>();
+        String projectAbbrev = String.format("org/apache/%s", project);
 
         reader = new BufferedReader(new FileReader(file));
         String text = null;
@@ -137,8 +138,8 @@ public class CustomFileUtil {
 
         while ((text = reader.readLine()) != null) {
             String[] line = text.split(",");
-            if (line.length >= 5 && line[0].toLowerCase().equals("java") && line[1].contains("org/apache/qpid")) {
-                commitMap.put(line[1].substring(line[1].indexOf("org/apache/qpid")), Integer.parseInt(line[4]));
+            if (line.length >= 5 && line[0].toLowerCase().equals("java") && line[1].contains(projectAbbrev)) {
+                commitMap.put(line[1].substring(line[1].indexOf(projectAbbrev)), Integer.parseInt(line[4]));
             }
             else {
                 System.out.println("bad class at " + line[1]);

@@ -7,6 +7,7 @@ import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.TreeMap;
 
 /**
  * Created by jroll on 11/4/15.
@@ -19,7 +20,7 @@ public class Requirement implements Serializable {
     private Ticket ticket;
     private ArrayList<GitMetadata> gitMetadatas;
     private ArrayList<String> currentFilesInRepo;
-    private HashMap<String, String> jiraFields;
+    private TreeMap<String, String> jiraFields;
     private LocalDateTime createDate;
     private LocalDateTime lastCommitDate;
 
@@ -35,11 +36,11 @@ public class Requirement implements Serializable {
         this.id = id;
     }
 
-    public HashMap<String, String> getJiraFields() {
+    public TreeMap<String, String> getJiraFields() {
         return jiraFields;
     }
 
-    public void setJiraFields(HashMap<String, String> jiraFields) {
+    public void setJiraFields(TreeMap<String, String> jiraFields) {
         this.jiraFields = jiraFields;
     }
 

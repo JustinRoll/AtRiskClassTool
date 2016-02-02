@@ -29,12 +29,27 @@ def parse_date(date_string):
 	nums = [int(num) for num in date_string.split("-")]
 	return date(nums[0], nums[1], nums[2])
 
+
 def print_args():
 	for i in range(0, len(sys.argv)):
 		print("%d:%s" % (i, sys.argv[i]))
 #open output file in create/trunk mode
 #grab data
 #call html_to_csv on the file
+"""
+def scrape_url(tup):
+	url = tup[0]
+	week_file = tup[1]
+	master_out = tup[2] 
+    f = open(week_file, "wr")
+		f.write(curl_html(url_string))
+		f.close()
+		include_header = False
+		if d == start_date:
+			include_header = True
+		
+		read_html(week_out_file, out_file_name, 10, header=include_header) 
+"""
 def grab_jira_data(jira_url, out_file_name, path,  start_date):
 	start_date = parse_date(start_date)
 	end_date_time = datetime.now()

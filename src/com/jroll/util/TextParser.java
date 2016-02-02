@@ -18,6 +18,18 @@ public class TextParser {
         return LocalDateTime.parse(text, formatter);
     }
 
+    public static boolean dateParsable(String text) {
+        //06/Oct/13 11:01
+        try {
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd/MMM/yy HH:mm");
+            LocalDateTime.parse(text, formatter);
+            return true;
+        }
+        catch (Exception e) {
+            return false;
+        }
+    }
+
 
     public static String getTicketIdQpid(String concreteLine) {
         List<String> allMatches = new ArrayList<String>();

@@ -53,8 +53,16 @@ public class FinalConfig {
 
     public String subProject;
 
+    public String sonarHost;
+
+    public String sonarProject;
+
+    public String[] sonarMetrics;
+    public String firstFix;
+
 
     public FinalConfig(XMLConfiguration config) {
+        this.bugFile = config.getString("bug_file");
         this.buildCommand = config.getString("build_command");
         this.staticAnalysisCommand = config.getString("static_analysis_command");
         this.clocCommand = config.getString("cloc_command");
@@ -62,7 +70,8 @@ public class FinalConfig {
         this.outReqFile = config.getString("out_req_file");
         this.reqMap = config.getString("req_map");
         this.fileMap = config.getString("file_map");
-        this.fixDataDirectory = config.getString("fix_data_directory");
+        this.firstFix = config.getString("first_fix_file");
+        this.fixDataDirectory = config.getString("fix_data_dir");
         this.fixFile = config.getString("fix_file");
         this.finalOutTable = config.getString("final_out_table");
         this.finalOutArff = config.getString("final_out_arff");
@@ -76,6 +85,9 @@ public class FinalConfig {
         this.reqLimit = config.getInt("req_limit");
         this.staticsFile = config.getString("statics_file");
         this.subProject = config.getString("subproject");
+        this.sonarHost = config.getString("sonar_host");
+        this.sonarProject = config.getString("sonar_project");
+        this.sonarMetrics = config.getStringArray("sonar_metrics");
     }
     /*
             <build_command>

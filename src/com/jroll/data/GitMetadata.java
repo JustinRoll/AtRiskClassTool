@@ -20,6 +20,7 @@ public class GitMetadata implements Serializable {
     private ArrayList<String> allFiles;
     private ArrayList<String> packages;
     private TreeMap<String, Integer> filesToLinesOfCode;
+    private String parent;
 
     public String toString() {
         return getCommitMessage() + " " + getAuthor() + " ";
@@ -111,5 +112,13 @@ public class GitMetadata implements Serializable {
 
     public void setAllFiles(ArrayList<String> allFiles) {
         this.allFiles = allFiles;
+    }
+
+    public void setParent(String parent) {
+        this.parent = parent;
+    }
+
+    public String getParent() {
+        return parent;
     }
 }

@@ -35,10 +35,10 @@ public class Serializer {
         this.config = config;
     }
 
-    public static void serializeReq(Requirement req, PrintWriter writer, String lastCommit, String last10, int fid, int rid, int changed) {
+    public static void serializeReq(Requirement req, PrintWriter writer, String lastCommit, String last10, int fid, int rid, boolean firstReq, int changed) {
         //System.out.printf("%s||%s||%s||%s||%d", req.getId(), req.getGitMetadatas().get(0).getCommitId(), req.getJiraFields().get("Description"), file, 1);
-        writer.write(String.format("%s|%s|%s|%s|%s|%s|%s|%d|%d|%d\n", req.getId(), last10, req.getJiraFields().get("Fix Version/s"), req.getJiraFields().get("Issue Type"), lastCommit.toString(), req.getJiraFields().get("Created"), stringifyCommits(req.getGitMetadatas()),
-                fid, rid, changed));
+        writer.write(String.format("%s|%s|%s|%s|%s|%s|%s|%d|%d|%d|%d\n", req.getId(), last10, req.getJiraFields().get("Fix Version/s"), req.getJiraFields().get("Issue Type"), lastCommit.toString(), req.getJiraFields().get("Created"), stringifyCommits(req.getGitMetadatas()),
+                fid, rid, firstReq?1:0, changed));
     }
 
     public void serializeReqs(ArrayList<Requirement> reqs, HashMap<String, LocalDateTime> map) throws FileNotFoundException, UnsupportedEncodingException {
@@ -47,7 +47,8 @@ public class Serializer {
         PrintWriter writer = new PrintWriter(config.outReqFile, "UTF-8");
         PrintWriter bugWriter = new PrintWriter(config.bugFile, "UTF-8");
 
-        writer.write("Ticket|Last 10 Touched|Fix Version|Issue Type|Last Commit Time|Req Created|Commits|File|Requirement|Changed?\n");
+        String header = "Ticket|Last 10 Touched|Fix Version|Issue Type|Last Commit Time|Req Created|Commits|File|Requirement|First Req?|Changed?";
+        writer.write(header + "\n");
 
         int reqCount = 0;
         int fileCount = 0;
@@ -57,18 +58,20 @@ public class Serializer {
         Set<String> versions = new HashSet<String>();
         ArrayBlockingQueue<String> lastTickets = null;
 
-        for (Requirement req : reqs.stream().filter(r -> !"0.25".equals(r.getJiraFields().get("Fix Version/s").trim()))
+        for (Requirement req : reqs.stream().filter(r -> reqs.size() > 0 && !reqs.get(0).equals(r.getJiraFields().get("Fix Version/s").trim()))
                 .collect(Collectors.toList())) {
-
+            Boolean firstReq = false;
             boolean bug = "Bug".equals(req.getJiraFields().get("Issue Type"));
             String reqText = req.getJiraFields().get("Description").replaceAll("\n", " ");
             LocalDateTime lastCommit = getLastCommitTime(req.getGitMetadatas());
 
             int rid = reqCount;
-            //if (reqCount++ > 500)
-            //    break;
 
-            versions.add(req.getJiraFields().get("Fix Version/s"));
+            if (!versions.contains(req.getJiraFields().get("Fix Version/s"))) {
+                versions.add(req.getJiraFields().get("Fix Version/s"));
+                firstReq = true;
+            }
+
 
             for (String file : addChangedFiles(req.getGitMetadatas())) {
                 int fid = fileCount;
@@ -100,7 +103,7 @@ public class Serializer {
 
                 }
 
-                serializeReq(req, bug ? bugWriter : writer, lastCommit.toString(), last10, fid, rid, 1);
+                serializeReq(req, bug ? bugWriter : writer, lastCommit.toString(), last10, fid, rid, firstReq, 1);
                 lastTickets.offer(req.getId());
                 if (lastTickets.size() >= 10)
                     lastTickets.poll();
@@ -127,14 +130,10 @@ public class Serializer {
                     fileWriter.write(String.format("%d||%s\n", fileCount, file));
                     fileCount++;
                 }
-                serializeReq(req, bug?bugWriter:writer, lastCommit.toString(), last10, fid, rid, 0);
+                serializeReq(req, bug?bugWriter:writer, lastCommit.toString(), last10, fid, rid, firstReq, 0);
             }
-
-
-
         }
 
-        //System.out.println(versions);
         reqWriter.close();
         fileWriter.close();
         writer.close();
@@ -166,29 +165,55 @@ public class Serializer {
 * .28
 * .34
 * etc */
-    public void serializeFixVersions(TreeMap<String, String> fixVersions) throws IOException, ConfigurationException, GitAPIException, InterruptedException {
-        PrintWriter fixWriter = new PrintWriter("fix.txt", "UTF-8");
+    public void serializeFixVersions(TreeMap<String, String> fixVersions, String firstFix) throws IOException, ConfigurationException, GitAPIException, InterruptedException {
+        PrintWriter fixWriter = new PrintWriter(config.fixFile, "UTF-8");
+        PrintWriter firstFixWriter = new PrintWriter(config.firstFix, "UTF-8");
         /* initialize gitrepo. check out commit. copy over the fix directory to
         a directory name of .24, .26
          */
 
-        String cpFix = "cp -r " + config.gitRepo + config.fixDataDirectory;
+        firstFixWriter.write(firstFix);
+        System.out.println(config.fixDataDirectory);
+        String cpFix = "cp -r " + config.gitRepo + " " + config.fixDataDirectory;
+        //String delNonJava = "find ~/Downloads/tika_data/ -type f ! -name '*.java' -print0 | xargs -0 rm -vf"
+        String delNonJava = String.format("find %s -type f ! -name '*.java' -print0 | xargs -0 rm -vf", config.fixDataDirectory);
         Repository localRepo = new FileRepository(config.gitRepo + "/.git");
         Runtime rt = Runtime.getRuntime();
 
         for (Map.Entry<String, String> fixVersion : fixVersions.entrySet()) {
             Git git = new Git(localRepo);
             git.checkout().setName(fixVersion.getValue()).call();
-
+            System.out.println(cpFix + fixVersion.getKey());
             Process pr = rt.exec(cpFix + fixVersion.getKey(),
                     null, new File(String.format("%s/", config.gitRepo)));
             int exitCode = pr.waitFor();
+            pr = rt.exec(delNonJava, null, new File(String.format("%s/", config.gitRepo)));
+            exitCode = pr.waitFor();
             System.out.printf("Done Fix Number:%s %d\n", fixVersion.getKey(), exitCode);
             System.out.println(cpFix + fixVersion.getKey());
 
             fixWriter.write(fixVersion.getKey() + "," + fixVersion.getValue() + "\n");
         }
         fixWriter.close();
+    }
+
+    public void copyFixVersions(TreeMap<String, String> fixVersions) throws IOException, ConfigurationException, GitAPIException, InterruptedException {
+
+        String cpFix = "cp -r " + config.gitRepo + " " + config.fixDataDirectory;
+        Repository localRepo = new FileRepository(config.gitRepo + "/.git");
+        Runtime rt = Runtime.getRuntime();
+
+        for (Map.Entry<String, String> fixVersion : fixVersions.entrySet()) {
+            Git git = new Git(localRepo);
+            git.checkout().setName(fixVersion.getValue()).call();
+            System.out.println(cpFix + fixVersion.getKey());
+            Process pr = rt.exec(cpFix + fixVersion.getKey(),
+                    null, new File(String.format("%s/", config.gitRepo)));
+            int exitCode = pr.waitFor();
+            System.out.printf("Done Fix Number:%s %d\n", fixVersion.getKey(), exitCode);
+            System.out.println(cpFix + fixVersion.getKey());
+        }
+
     }
 
     public void runBigTable(TreeMap<String, ClassData> fixToClassData) throws Exception {
@@ -302,9 +327,10 @@ public class Serializer {
         String currentCodeLine = null;
         TreeMap<String, TreeMap<String, Integer>> staticMap = readStatics(config.staticsFile);
         TreeMap<String, Integer> frequencyMap = new TreeMap<String, Integer>();
+        TreeMap<String, List<AbstractMap.SimpleEntry<Integer,LocalDateTime>>> frequencyByDate = new TreeMap<String, List<AbstractMap.SimpleEntry<Integer,LocalDateTime>>>();
 
         //This field will map a class to its frequency of change
-        float ticketCount = 0.0f;
+        Integer ticketCount = 0;
         String prevTicket = null;
         PrintWriter writer = new PrintWriter(config.finalOutTable);
 
@@ -366,14 +392,20 @@ public class Serializer {
             Integer freq = frequencyMap.get(className) == null ? 0 : frequencyMap.get(className);
             if (line[9].trim().equals("1")) {
                 frequencyMap.put(className, freq + 1);
+                if (frequencyByDate.get(className) == null)
+                    frequencyByDate.put(className, new ArrayList<AbstractMap.SimpleEntry<Integer, LocalDateTime>>());
+                List<AbstractMap.SimpleEntry<Integer, LocalDateTime>> dateFreqs = frequencyByDate.get(className);
+                LocalDateTime lastCommitTime = TextParser.parseDateString(line[headerMap.get("Last Commit Time")]);
+                dateFreqs.add(new AbstractMap.SimpleEntry<Integer, LocalDateTime>(ticketCount, lastCommitTime));
                 //System.out.println(line[0] + " " + line[7] + "freq increase");
             }
-            else {
-                //System.out.println(line[0] + " " + line[7] + " freq same");
-            }
+
+            double baseHistory = Math.min(1.0, freq / ticketCount);
+            double logHistory = HistoryCalculator.getLogHistory(ticketCount, frequencyByDate.get(className));
+            double wtHistory = HistoryCalculator.getWeightedHistory(ticketCount, frequencyByDate.get(className));
             int staticCount = getStaticCount(line[2], className, staticMap);
             String last10 = line[1].replaceAll(",", " ");
-            String firstFields = String.format("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%.5f\t", line[0], last10, line[2].replaceAll(",", "|"), line[3], line[4], line[5], line[6], line[7], line[8], staticCount, Math.min(1.0, freq / ticketCount));
+            String firstFields = String.format("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%.5f\t", line[0], last10, line[2].replaceAll(",", "|"), line[3], line[4], line[5], line[6], line[7], line[8], staticCount, baseHistory);
 
 
             ClassMetrics cm = currentFix.getCkjmMetrics().get(className.replaceAll(".java", "").replaceAll("/", "."));

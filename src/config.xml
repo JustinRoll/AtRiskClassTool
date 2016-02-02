@@ -68,5 +68,15 @@
         CodeSimilarity_new.csv
     </code_similarity>
 
+    <sonar_host>
+        http://localhost:9000/
+    </sonar_host>
+    <sonar_project>
+        apache-ignite
+    </sonar_project>
+    <sonar_metrics>
+        lines,complexity
+    </sonar_metrics>
+
 
 </config>

@@ -15,7 +15,10 @@ import java.io.IOException;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.TreeMap;
+
+import static com.jroll.util.TextParser.dateParsable;
 
 /**
  * Created by jroll on 9/27/15.
@@ -46,25 +49,25 @@ public class JiraExtractor extends Extractor {
             TreeMap<String, String> rowMap = new TreeMap<String, String>();
             for (String col : row) {
                 rowMap.put(header[colIndex], col);
-                //System.out.println(header[colIndex]);
-                //System.out.println(col);
+
                 colIndex++;
                 if (colIndex >= header.length)
                     break;
             }
             row = csvReader.readNext();
-            rowList.add(rowMap);
+            if (rowMap.get("Key") != null && rowMap.get("Created") != null && dateParsable(rowMap.get("Created")))
+                rowList.add(rowMap);
         }
         return rowList;
     }
 
-    public static ArrayList<HashMap<String, String>> parseExcel(String fileName) throws IOException, BiffException {
+    public static ArrayList<TreeMap<String, String>> parseExcel(String fileName) throws IOException, BiffException {
         Workbook workbook = Workbook.getWorkbook(new File(fileName));
         Sheet sheet = workbook.getSheet(1);
         int numCols = 83;
         int row = 1;
         String[] header = new String[numCols];
-        ArrayList<HashMap<String, String>> rowList = new ArrayList<HashMap<String, String>>();
+        ArrayList<TreeMap<String, String>> rowList = new ArrayList<TreeMap<String, String>>();
 
         for (int i = 0; i < numCols; i++) {
             header[i] = sheet.getCell(i, 0).getContents();
@@ -76,7 +79,7 @@ public class JiraExtractor extends Extractor {
                 System.out.println("||bad|| " + sheet.getRow(row)[0].getContents().toLowerCase());
                 continue;
             }
-            HashMap<String, String> rowMap = new HashMap<String, String>();
+            TreeMap<String, String> rowMap = new TreeMap<String, String>();
             int j = 0;
             for (Cell cell : sheet.getRow(row)) {
 

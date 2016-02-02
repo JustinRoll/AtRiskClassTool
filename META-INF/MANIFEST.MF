@@ -1,0 +1,4 @@
+Manifest-Version: 1.0
+Class-Path: args4j-2.32.jar
+Main-Class: com.jroll.driver.MainDriver
+
