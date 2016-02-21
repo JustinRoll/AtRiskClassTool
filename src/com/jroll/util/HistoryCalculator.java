@@ -12,6 +12,11 @@ public class HistoryCalculator {
     public static double ln(int number) {
         return (-Math.log(1 - number)) / number;
     }
+
+
+    /*
+        For each class, keep track of the occasions it was modified. Calculate the log weighted
+     */
     public static double getLogHistory(Integer ticketCount, List<AbstractMap.SimpleEntry<Integer, LocalDateTime>> simpleEntries) {
         double accumulated = 0;
         final int LOG_LOWER_BOUND = 3;

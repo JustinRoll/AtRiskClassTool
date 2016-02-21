@@ -55,9 +55,11 @@ public class FinalConfig {
 
     public String sonarHost;
 
-    public String sonarProject;
+    public String[] sonarProject;
 
     public String[] sonarMetrics;
+
+    public String sonarCommand;
     public String firstFix;
 
 
@@ -86,8 +88,9 @@ public class FinalConfig {
         this.staticsFile = config.getString("statics_file");
         this.subProject = config.getString("subproject");
         this.sonarHost = config.getString("sonar_host");
-        this.sonarProject = config.getString("sonar_project");
+        this.sonarProject = config.getStringArray("sonar_project");
         this.sonarMetrics = config.getStringArray("sonar_metrics");
+        this.sonarCommand = config.getString("sonar_command");
     }
     /*
             <build_command>

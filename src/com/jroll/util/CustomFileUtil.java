@@ -1,26 +1,161 @@
 package com.jroll.util;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-import java.io.IOException;
+import com.jroll.data.ClassData;
+
+import java.io.*;
+import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Set;
 import java.util.TreeMap;
+import java.nio.file.*;
+
+import static com.jroll.driver.MainDriver.readClasses;
+import static java.nio.file.StandardCopyOption.*;
+import java.nio.file.attribute.*;
+import static java.nio.file.FileVisitResult.*;
+import java.io.IOException;
+import java.util.*;
 
 /**
  * Created by jroll on 12/10/15.
  */
 public class CustomFileUtil {
 
-    /* example
-    public static void main(String[] args) {
-        ArrayList<File> files = findFileSub("/Users/jroll/dev/thesis/qpid-java", "target", "findBugsXml.xml");
-        System.out.println(files);
-    }
-    */
 
+
+    /**
+     * Copy source file to target location. If {@code prompt} is true then
+     * prompt user to overwrite target if it exists. The {@code preserve}
+     * parameter determines if file attributes should be copied/preserved.
+     */
+    static void copyFile(Path source, Path target) {
+        CopyOption[] options =
+                new CopyOption[] { COPY_ATTRIBUTES, REPLACE_EXISTING };
+
+            try {
+                Files.copy(source, target, options);
+            } catch (IOException x) {
+                System.err.format("Unable to copy: %s: %s%n", source, x);
+            }
+
+    }
+
+    /*
+    # Required metadata
+    sonar.projectKey=java-sonar-runner-simple
+    sonar.projectName=Simple Java project analyzed with the SonarQube Runner
+    sonar.projectVersion=1.0
+
+# Comma-separated paths to directories with sources (required)
+sonar.sources=src
+
+# Language
+sonar.language=java
+
+# Encoding of the source files
+sonar.sourceEncoding=UTF-8
+     */
+    static File generateSonarProperties(String projectKey, String projectVersion, String language) throws FileNotFoundException, UnsupportedEncodingException {
+        String sonar = "sonar_project.properties";
+        PrintWriter writer = new PrintWriter(sonar, "UTF-8");
+
+        String baseString = "sonar.projectKey=" + projectKey + "\n";
+
+        baseString += "sonar.projectName=" + projectKey + "\n";
+        baseString += "sonar.projectVersion=" + projectVersion + "\n";
+        baseString+= "sonar.srces=src\n";
+        baseString+= "sonar.language=" + language + "\n";
+        baseString+= "sonar.sourceEncoding=UTF-8\n";
+
+        writer.write(baseString);
+        writer.close();
+
+        return new File(sonar);
+    }
+
+
+    /**
+     * A {@code FileVisitor} that copies a file-tree ("cp -r")
+     */
+    static class TreeCopier implements FileVisitor<Path> {
+        private final Path source;
+        private final Path target;
+
+        private String extension;
+
+        TreeCopier(Path source, Path target, String extension) {
+            this.source = source;
+            this.target = target;
+            this.extension = extension;
+
+        }
+
+        @Override
+        public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+            // before visiting entries in a directory we copy the directory
+            // (okay if directory already exists).
+            CopyOption[] options = (
+                    new CopyOption[] { COPY_ATTRIBUTES });
+
+            Path newdir = target.resolve(source.relativize(dir));
+            try {
+                Files.copy(dir, newdir, options);
+            } catch (FileAlreadyExistsException x) {
+                // ignore
+            } catch (IOException x) {
+                System.err.format("Unable to create: %s: %s%n", newdir, x);
+                return SKIP_SUBTREE;
+            }
+            return CONTINUE;
+        }
+
+        @Override
+        public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+            if (file.toString().contains(extension)) {
+                copyFile(file, target.resolve(source.relativize(file)));
+
+            }
+            return CONTINUE;
+        }
+
+        @Override
+        public FileVisitResult postVisitDirectory(Path dir, IOException exc) {
+            // fix up modification time of directory when done
+            if (exc == null) {
+                Path newdir = target.resolve(source.relativize(dir));
+                try {
+                    FileTime time = Files.getLastModifiedTime(dir);
+                    Files.setLastModifiedTime(newdir, time);
+                } catch (IOException x) {
+                    System.err.format("Unable to copy all attributes to: %s: %s%n", newdir, x);
+                }
+            }
+            return CONTINUE;
+        }
+
+        @Override
+        public FileVisitResult visitFileFailed(Path file, IOException exc) {
+            if (exc instanceof FileSystemLoopException) {
+                System.err.println("cycle detected: " + file);
+            } else {
+                System.err.format("Unable to copy: %s: %s%n", file, exc);
+            }
+            return CONTINUE;
+        }
+    }
+
+    public static void copyAllExtension(String fromDirectory, String toDirectory, String extension) throws IOException {
+        Path source = Paths.get(fromDirectory);
+        Path dest = Paths.get(toDirectory);
+
+
+                // follow links when copying files
+        EnumSet<FileVisitOption> opts = EnumSet.of(FileVisitOption.FOLLOW_LINKS);
+        TreeCopier tc = new TreeCopier(source, dest, extension);
+        Files.walkFileTree(source, opts, Integer.MAX_VALUE, tc);
+    }
     public static String trimSlash(String f) {
         return f.toString().substring(0, f.toString().lastIndexOf("/"));
     }
@@ -86,7 +221,7 @@ public class CustomFileUtil {
 
             String[] line = text.split(delimiter);
 
-            if (line.length >= 1) {
+            if (line.length > 1) {
                 commitMap.put(line[0], line[1]);
             }
         }

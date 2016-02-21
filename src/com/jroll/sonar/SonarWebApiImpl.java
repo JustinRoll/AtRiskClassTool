@@ -1,12 +1,6 @@
 package com.jroll.sonar;
 
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.io.UnsupportedEncodingException;
+import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
@@ -22,26 +16,40 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.apache.commons.codec.binary.Base64;
 
+import static com.jroll.sonar.JsonParserForSonarApiResponses.jsonParsable;
+
 public class SonarWebApiImpl implements SonarWebApi {
     public static String sonarHost; //FIXME
     private static String project;
+    private static String[] projectList;
     private static String projectResourceKey;
     private String qualityProfileKey;
     String[] metrics;
 
 
-    /* Given the class and project, pull metrics for an individual class */
-    public HashMap<String, Double> getSonarMetrics(String className) {
-        return null;
-    }
-
     /* given a project, pull metrics for ALL classes
      * eg view-source:http://localhost:9000/api/resources?resource=ignite:ignite&depth=-1&scope=FIL&metrics=lines&format=json */
-    public TreeMap<String, HashMap<String, Double>> getSonarMetrics() throws IOException {
-        String baseUrl = "%s/api/resources?resource=%s&depth=-1&scope=FIL&metrics=%s&format=json";
-        String finalUrl = String.format(baseUrl, sonarHost, project, String.join(",", metrics));
-        System.out.println(finalUrl);
-        String response = sendGet(finalUrl);
+    public TreeMap<String, HashMap<String, Double>> getSonarMetrics() throws IOException, InterruptedException {
+        int argNumber = 0;
+        String response = "bad response";
+        System.out.println(projectList.length);
+
+        while (!jsonParsable(response) && argNumber < projectList.length) {
+            String currProject = projectList[argNumber++];
+            System.out.printf("%s %d", response, argNumber);
+            String baseUrl = "%s/api/resources?resource=%s&depth=-1&scope=FIL&metrics=%s&format=json";
+            String finalUrl = String.format(baseUrl, sonarHost, currProject, String.join(",", metrics));
+            for (int i = 0; i < 4 && response.equals("bad response"); i++) {
+                try {
+                    response = sendGet(finalUrl);
+                    Thread.sleep(30000);
+                    System.out.println("Breaking out");
+                } catch (FileNotFoundException e) {
+                    System.out.println(e);
+
+                }
+            }
+        }
 
         return JsonParserForSonarApiResponses.parseClassMetrics(response);
     }
@@ -58,8 +66,9 @@ public class SonarWebApiImpl implements SonarWebApi {
     {
         metrics = config.sonarMetrics;
         SonarWebApiImpl.sonarHost = config.sonarHost;
-        SonarWebApiImpl.project = config.sonarProject;
-        this.qualityProfileKey = getProjectResourceKey();
+        SonarWebApiImpl.project = config.sonarProject[0];
+        SonarWebApiImpl.projectList = config.sonarProject;
+        //this.qualityProfileKey = getProjectResourceKey();
 
 
     }
@@ -136,10 +145,20 @@ public class SonarWebApiImpl implements SonarWebApi {
         return response.toString();
     }
 
-    public static void deleteProject(String project) throws IOException {
-        String finalUrl = String.format("%s/api/%s", sonarHost, project);
-        System.out.println(finalUrl);
-        sendRequest(finalUrl, new ArrayList(), "DELETE");
+    /*
+    curl -u admin:admin -X POST 'http://localhost:9000/api/projects/delete?key=org.apache.tika:tika'
+     */
+    public void deleteProject() throws IOException, InterruptedException {
+
+        for (String project : projectList) {
+            String finalUrl = String.format("%s/api/projects/delete?key=%s", sonarHost, project);
+            System.out.println(finalUrl);
+            try {
+                sendRequest(finalUrl, new ArrayList(), "POST");
+            } catch (HttpResponseException e) {
+                System.out.println(e);
+            }
+        }
     }
 
     private static void sendRequest(String url, List<NameValuePair> params, String type) throws IOException {

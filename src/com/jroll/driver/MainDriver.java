@@ -10,9 +10,11 @@ import com.jroll.extractors.JiraExtractor;
 import com.jroll.sonar.SonarWebApiImpl;
 import com.jroll.util.*;
 import gr.spinellis.ckjm.ClassMetrics;
+import org.apache.commons.collections4.bidimap.AbstractDualBidiMap;
 import org.apache.commons.configuration.ConfigurationException;
 import org.apache.commons.configuration.XMLConfiguration;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.ResetCommand;
 import org.eclipse.jgit.internal.storage.file.FileRepository;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
@@ -31,6 +33,7 @@ import static com.jroll.command.CommandExecutor.runCommand;
 import static com.jroll.util.CKJMUtil.readDependencies;
 import static com.jroll.util.CustomFileUtil.*;
 import static com.jroll.util.ReportUtil.tabulate_report;
+import static com.jroll.util.ReportUtil.testSerializedFile;
 import static com.jroll.util.TextParser.getTicketId;
 import static com.jroll.util.TextParser.parseDateString;
 import static org.kohsuke.args4j.ExampleMode.ALL;
@@ -47,6 +50,9 @@ public class MainDriver {
     @Option(name="-config",usage="config file to open",metaVar="OUTPUT")
     private String configFile;
 
+    @Option(name="-cpr",usage="number of commits per release",metaVar="OUTPUT")
+    private int cpr = -1;
+
     // receives other command line parameters than options
     @Argument
     private List<String> operations = new ArrayList<String>();
@@ -54,7 +60,8 @@ public class MainDriver {
     private String RUN_REQS = "reqs";
     private String RUN_JIRA = "jira";
     private String RUN_QUALITY_REPORT = "report";
-    private String ANALYZE_COMMITS = "commits";
+    private String RUN_STATICS_REPORT = "report_statics";
+    private String STATIC_ANALYSIS = "statics";
     private String RUN_SIMILARITY = "similarity";
     private String RUN_DUMB_BIGTABLE = "dumb";
     private String RUN_BIGTABLE = "big";
@@ -63,13 +70,14 @@ public class MainDriver {
     private String DEBUG_SONAR = "debug_sonar";
     private Boolean IS_SONAR = false;
 
+    public final String FIX_ERRORS = "fix_errors.txt";
     FinalConfig config;
 
 
 
     public TreeMap<String, ClassData> runStaticMetrics() throws Exception {
 
-        TreeMap<String, String> fixVersions = CustomFileUtil.readFile(config.fixFile, "\\|");
+        TreeMap<String, String> fixVersions = CustomFileUtil.readFile(config.fixFile, ",");
         System.out.println(fixVersions);
         return analyzeCommits(fixVersions);
     }
@@ -140,6 +148,10 @@ public class MainDriver {
         }
         if (operations.contains(RUN_REQS)) {
             analyzeReqs();
+
+        }
+        if (operations.contains(RUN_STATICS_REPORT)) {
+            testSerializedFile(config);
         }
 
         if (operations.contains(RUN_FIX)) {
@@ -148,6 +160,10 @@ public class MainDriver {
 
         if (operations.contains(DEBUG_SONAR)) {
             debugSonar(config);
+        }
+
+        if (operations.contains(STATIC_ANALYSIS)) {
+            runStaticMetrics();
         }
 
         if (operations.contains(RUN_DUMB_BIGTABLE) || operations.contains(RUN_BIGTABLE)) {
@@ -171,15 +187,38 @@ public class MainDriver {
 
     }
 
-    private void debugSonar(FinalConfig config) throws IOException, ConfigurationException {
+
+
+
+    private void debugSonar(FinalConfig config) throws IOException, ConfigurationException, InterruptedException {
         SonarWebApiImpl api = new SonarWebApiImpl(config);
         System.out.println(api.getSonarMetrics());
     }
 
-    private TreeMap<String, HashMap<String, Double>> runSonar(FinalConfig config) throws IOException, ConfigurationException, InterruptedException {
+    private TreeMap<String, HashMap<String, Double>> runSonar(FinalConfig config, Runtime rt) throws IOException, ConfigurationException, InterruptedException {
+
+
         SonarWebApiImpl api = new SonarWebApiImpl(config);
-        runCommand("sonar-runner", config.gitRepo);
-        return api.getSonarMetrics();
+
+        if (rt == null)
+            rt = Runtime.getRuntime();
+
+        api.deleteProject();
+
+        Process pr = rt.exec(config.sonarCommand, null, new File(String.format("%s/", config.gitRepo)));
+        printOutput(pr);
+        int exitCode = pr.waitFor();
+        Thread.sleep(160000);
+
+        //runCommand("sonar-runner", config.gitRepo);
+        try {
+            return api.getSonarMetrics();
+        }
+        catch (Exception e) {
+            System.out.println("Couldn't run sonar metrics");
+            return new TreeMap<String, HashMap<String, Double>>();
+        }
+
     }
 
 
@@ -193,7 +232,65 @@ public class MainDriver {
         return 0;
     }
 
+    /* Determine a fix version based on the current commit number.
+        Serialize the list of fix versions
+     */
+    public  void analyzeReqsUnorganized(int commitsPerRelease) throws Exception {
+        int releaseCount = 0;
 
+        Serializer s = new Serializer(config);
+        List<TreeMap<String, String>> jiraRows;
+        if (config.jiraFile.contains(".xls"))
+            jiraRows =  JiraExtractor.parseExcel(config.jiraFile);
+        else
+            jiraRows = JiraExtractor.parseCSVToMap(config.jiraFile);
+
+        System.out.println("Jira Data Done");
+        /* Gather all commit data */
+        CommitData data = gatherCommits();
+        System.out.println("Commit Data Done");
+        ArrayList<Requirement> reqs = new ArrayList<Requirement>();
+        String firstFix = "0";
+
+        String cpFix = "cp -r " + config.gitRepo + " " + config.fixDataDirectory;
+
+
+        TreeMap<String, String> fixVersions = new TreeMap<String, String>();
+
+        for (TreeMap<String, String> row : jiraRows) {
+            String ticketId = row.get("Key").replaceAll("[^0-9]", ""); //strip project name from ticket
+            if (data.gitMetas.get(ticketId) != null) {//Look up each mapped commit {
+
+                Requirement req = new Requirement();
+                req.setJiraFields(row);
+                req.setId(row.get("Key"));
+
+                req.setCreateDate(parseDateString(row.get("Created")));
+                req.setGitMetadatas(data.gitMetas.get(ticketId));
+                reqs.add(req);
+                String fixVersion = req.getJiraFields().get("Fix Version/s").replaceAll(",", "_");
+
+
+                if (fixVersions.get(fixVersion) == null) {
+                    String normalCommit = req.getGitMetadatas().get(0).getCommitId();
+                    String parentCommit = req.getGitMetadatas().get(0).getParent();
+                    System.out.printf("Parent commit: %s Original %s", normalCommit, parentCommit);
+                    fixVersions.put(fixVersion, parentCommit != null && parentCommit.length() > 1 ? parentCommit : normalCommit);
+                }
+
+                //System.out.println("Found a match");
+            }
+
+
+            //Check to see if there is a ticket match
+        }
+
+        s.serializeFixVersions(fixVersions, firstFix);
+        s.copyFixVersions(fixVersions);
+        //analyzeCommits(fixVersions);
+        s.serializeReqs(reqs, data.fileCommitDates);
+        System.out.println("Serialization complete");
+    }
 
 
 
@@ -235,7 +332,7 @@ public class MainDriver {
                 req.setCreateDate(parseDateString(row.get("Created")));
                 req.setGitMetadatas(data.gitMetas.get(ticketId));
                 reqs.add(req);
-                String fixVersion = req.getJiraFields().get("Fix Version/s");
+                String fixVersion = req.getJiraFields().get("Fix Version/s").replaceAll(",", "_");
                 if (firstFix == null)
                     firstFix = fixVersion;
 
@@ -384,8 +481,22 @@ public class MainDriver {
         return new CommitData(gitMetas, fileCommitDates);
     }
 
+    public TreeMap<String, String> getMissingVersions(TreeMap<String, ClassData> orig, TreeMap<String, String> fixes) {
 
-    public  TreeMap<String, ClassData> analyzeCommits(TreeMap<String, String> fixVersions) throws Exception {
+        TreeMap<String, String> finalFixes = new TreeMap<String, String>();
+
+        for (Map.Entry<String, String> entry : fixes.entrySet()) {
+            if (orig != null && !orig.containsKey(entry.getKey())) {
+                finalFixes.put(entry.getKey(), entry.getValue());
+            }
+        }
+
+        return finalFixes;
+    }
+
+
+    /* To do: Open ser file. See which fixes we need data for */
+    public  TreeMap<String, ClassData> analyzeCommits(TreeMap<String, String> initialfixVersions) throws Exception {
         Repository localRepo = new FileRepository(config.gitRepo + "/.git");
         Runtime rt = Runtime.getRuntime();
         FindBugsExtractor ex = new FindBugsExtractor(config.gitRepo + "/" + config.subProject, config.findBugsRelative);
@@ -393,26 +504,86 @@ public class MainDriver {
         Git git = new Git(localRepo);
         TreeMap<String, ClassData> statics = new TreeMap<String, ClassData>();
         int i = 0;
-
+        TreeMap<String, String> fixVersions = getMissingVersions(readClasses(config), initialfixVersions);
+        PrintWriter pw = new PrintWriter(FIX_ERRORS);
 
         for (Map.Entry<String, String> fixVersion : fixVersions.entrySet()) {
             System.out.printf("Fix:%s Commit:%s\n", fixVersion.getKey(), fixVersion.getValue());
-            ClassData  metrics = analyzeCommit(git, fixVersion.getValue(), rt, ex);
-            FileOutputStream f_out = new
-                    FileOutputStream(config.sonarProject + ".ser");
+            try {
+                ClassData metrics = analyzeCommit(git, fixVersion.getValue(), rt, ex);
+                FileOutputStream f_out = new
+                        FileOutputStream(config.staticsFile);
 
-            ObjectOutputStream obj_out = new
-                    ObjectOutputStream (f_out);
+                ObjectOutputStream obj_out = new
+                        ObjectOutputStream(f_out);
 
-            obj_out.writeObject(statics);
-            statics.put(fixVersion.getKey(), metrics);
+                obj_out.writeObject(statics);
+                statics.put(fixVersion.getKey(), metrics);
+            }
+            /* log failed fix to file */
+            catch (Exception e) {
+                pw.write("Fix " + fixVersion.getKey());
+                pw.write("\n");
+                pw.write(e.toString());
+            }
         }
         System.out.println("static metrics");
-        //System.out.println(statics);
-        //serializeStatic(statics);
+
+        serializeStatic(statics);
+        System.out.println(readStatics(config.staticsFile));
         return statics;
     }
 
+
+
+
+    /* Serialize static metrics to a file. We need to check the .ser file and see if
+        it has already been completed.
+     */
+    private void serializeStatic(TreeMap<String, ClassData> statics) {
+        TreeMap<String, ClassData> origMetrics = readClasses(config);
+        for (Map.Entry<String, ClassData> entry: statics.entrySet()) {
+            origMetrics.put(entry.getKey(), entry.getValue());
+        }
+
+        try
+        {
+            FileOutputStream fileOut =
+                    new FileOutputStream(config.staticsFile);
+            ObjectOutputStream out = new ObjectOutputStream(fileOut);
+            out.flush();
+            out.writeObject(statics);
+            out.close();
+            fileOut.close();
+            System.out.printf("Serialized data is saved in " + config.staticsFile);
+        }catch(IOException i)
+        {
+            i.printStackTrace();
+        }
+
+    }
+
+    /* Read the list of classes serialized from file */
+    public static TreeMap<String, ClassData>  readClasses(FinalConfig config) {
+        TreeMap<String, ClassData> classes = null;
+        try {
+            ObjectInputStream fileIn = new ObjectInputStream(new FileInputStream(config.staticsFile));
+            try {
+                classes = (TreeMap<String, ClassData>) fileIn.readObject();
+            }
+            catch(ClassNotFoundException e) {
+                System.out.println("Error reading class file");
+                System.out.println(e);
+            }
+
+        }
+        catch(IOException  e) {
+            System.out.println("Error reading serialized file");
+            System.out.println(e);
+
+        }
+        return classes == null ? new TreeMap<String, ClassData>() : classes;
+    }
 
 
     /* perform static analysis for a single commit */
@@ -423,18 +594,26 @@ public class MainDriver {
         ClassData data = new ClassData();
 
         System.out.println("checking out commit");
+        git.reset().setMode( ResetCommand.ResetType.HARD ).call();
+        Thread.sleep(1000);
         git.checkout().setName(commit).call();
 
-        Process pr = rt.exec(config.buildCommand, null, new File(String.format("%s/", config.gitRepo)));
-        printOutput(pr);
-        int exitCode = pr.waitFor();
+
+        if (config.buildCommand != null && config.buildCommand != "") {
+            System.out.println(config.buildCommand);
+            Process pr = rt.exec(config.buildCommand, null, new File(String.format("%s/", config.gitRepo)));
+            printOutput(pr);
+            int exitCode = pr.waitFor();
+        }
 
 
         if (this.IS_SONAR) {
-            data.setSonarMetrics(runSonar(config));
+            System.out.println("Running sonarqube");
+
+            data.setSonarMetrics(runSonar(config, rt));
         }
         else {
-            runClocData(pr, rt, data);
+            runClocData(rt, data);
         }
 
         Map<String, ClassMetrics> ckjmMap = readDependencies(config.gitRepo);
@@ -444,11 +623,11 @@ public class MainDriver {
         return data;
     }
 
-    public void runClocData(Process pr, Runtime rt, ClassData data) throws IOException, InterruptedException {
+    public void runClocData(Runtime rt, ClassData data) throws IOException, InterruptedException {
         Process clocPr = rt.exec(config.clocCommand, null, new File(String.format("%s/", config.gitRepo)));
-        printOutput(pr);
-        int exitCode = pr.waitFor();
-        TreeMap<String, Integer> clocs = readClocFile(config.sonarProject, config.clocFile);
+        printOutput(clocPr);
+        int exitCode = clocPr.waitFor();
+        TreeMap<String, Integer> clocs = readClocFile(config.sonarProject[0], config.clocFile);
         data.setLinesOfCode(clocs);
 
     }

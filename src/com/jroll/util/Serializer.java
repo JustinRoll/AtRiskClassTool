@@ -174,23 +174,18 @@ public class Serializer {
 
         firstFixWriter.write(firstFix);
         System.out.println(config.fixDataDirectory);
-        String cpFix = "cp -r " + config.gitRepo + " " + config.fixDataDirectory;
+        //String cpFix = "cp -r " + config.gitRepo + " " + config.fixDataDirectory;
+
         //String delNonJava = "find ~/Downloads/tika_data/ -type f ! -name '*.java' -print0 | xargs -0 rm -vf"
-        String delNonJava = String.format("find %s -type f ! -name '*.java' -print0 | xargs -0 rm -vf", config.fixDataDirectory);
+        //String delNonJava = String.format("find %s -type f ! -name '*.java' -print0 | xargs -0 rm -vf", config.fixDataDirectory);
         Repository localRepo = new FileRepository(config.gitRepo + "/.git");
         Runtime rt = Runtime.getRuntime();
 
         for (Map.Entry<String, String> fixVersion : fixVersions.entrySet()) {
             Git git = new Git(localRepo);
             git.checkout().setName(fixVersion.getValue()).call();
-            System.out.println(cpFix + fixVersion.getKey());
-            Process pr = rt.exec(cpFix + fixVersion.getKey(),
-                    null, new File(String.format("%s/", config.gitRepo)));
-            int exitCode = pr.waitFor();
-            pr = rt.exec(delNonJava, null, new File(String.format("%s/", config.gitRepo)));
-            exitCode = pr.waitFor();
-            System.out.printf("Done Fix Number:%s %d\n", fixVersion.getKey(), exitCode);
-            System.out.println(cpFix + fixVersion.getKey());
+             //pr = rt.exec(delNonJava, null, new File(String.format("%s/", config.gitRepo)));
+            //System.out.println(delNonJava);
 
             fixWriter.write(fixVersion.getKey() + "," + fixVersion.getValue() + "\n");
         }
@@ -199,19 +194,20 @@ public class Serializer {
 
     public void copyFixVersions(TreeMap<String, String> fixVersions) throws IOException, ConfigurationException, GitAPIException, InterruptedException {
 
-        String cpFix = "cp -r " + config.gitRepo + " " + config.fixDataDirectory;
+
         Repository localRepo = new FileRepository(config.gitRepo + "/.git");
         Runtime rt = Runtime.getRuntime();
 
         for (Map.Entry<String, String> fixVersion : fixVersions.entrySet()) {
+            PrintWriter pw = new PrintWriter("../../rsync_temp");
+            String cpFix = "-avm --include='*.java' -f 'hide,! */' " + config.gitRepo + " " + config.fixDataDirectory;
+            System.out.println(fixVersion.getValue());
+            pw.write(cpFix + "/" + fixVersion.getKey());
+            pw.close();
             Git git = new Git(localRepo);
             git.checkout().setName(fixVersion.getValue()).call();
-            System.out.println(cpFix + fixVersion.getKey());
-            Process pr = rt.exec(cpFix + fixVersion.getKey(),
-                    null, new File(String.format("%s/", config.gitRepo)));
-            int exitCode = pr.waitFor();
-            System.out.printf("Done Fix Number:%s %d\n", fixVersion.getKey(), exitCode);
-            System.out.println(cpFix + fixVersion.getKey());
+            CustomFileUtil.copyAllExtension(config.gitRepo, config.fixDataDirectory + "/" + fixVersion.getKey(), ".java");
+
         }
 
     }

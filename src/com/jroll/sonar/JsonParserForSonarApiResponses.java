@@ -22,6 +22,16 @@ public class JsonParserForSonarApiResponses {
         return obj.getString("dt");
     }
 
+    public static Boolean jsonParsable(String response) {
+        try {
+            new JSONArray(response);
+            return true;
+        }
+        catch (JSONException e) {
+            return false;
+        }
+    }
+
     public static int getNloc(String json)
     {
         JSONArray violationsMetric = new JSONArray(json);
@@ -128,21 +138,35 @@ public class JsonParserForSonarApiResponses {
     public static TreeMap<String, HashMap<String, Double>> parseClassMetrics(String response) {
         JSONArray resources = new JSONArray(response);
         TreeMap<String, HashMap<String, Double>> classMetrics = new TreeMap<String, HashMap<String, Double>>();
+        System.out.println(response);
+        int good = 0;
+        int bad = 0;
 
         for (int i = 0; i < resources.length(); i++) {
             HashMap<String, Double> metricMap = new HashMap<String, Double>();
             JSONObject currentResource = resources.getJSONObject(i);
             String className = currentResource.getString("key");
             classMetrics.put(className, metricMap);
-            JSONArray metrics = currentResource.getJSONArray("msr");
 
-            for (int j = 0; j < metrics.length(); j++) {
-                JSONObject currentMetric = metrics.getJSONObject(j);
-                String metricName = currentMetric.getString("key");
-                Double metricValue = currentMetric.getDouble("val");
-                metricMap.put(metricName, metricValue);
+            try {
+                JSONArray metrics = currentResource.getJSONArray("msr");
+
+                for (int j = 0; j < metrics.length(); j++) {
+                    JSONObject currentMetric = metrics.getJSONObject(j);
+                    String metricName = currentMetric.getString("key");
+                    Double metricValue = currentMetric.getDouble("val");
+                    metricMap.put(metricName, metricValue);
+                }
+                good++;
             }
+            catch (JSONException e){
+                bad++;
+                System.out.println("COULD NOT PARSE JSON FOR " + currentResource);
+            }
+
         }
+        System.out.println("--------");
+        System.out.printf("%d SUCCESSFUL, %d UNSUCCESSFUL\n", good, bad);
         return classMetrics;
     }
 
