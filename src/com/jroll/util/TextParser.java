@@ -18,6 +18,33 @@ public class TextParser {
         return LocalDateTime.parse(text, formatter);
     }
 
+    /*
+    31/Mar/07 7:05 AM
+     */
+    public static LocalDateTime parseDateStringAmPm(String text) {
+        //06/Oct/13 11:01
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd/MMM/yy H:mm");
+        return LocalDateTime.parse(text, formatter);
+    }
+    /* 2016-02-19T00:10:59Z */
+    public static LocalDateTime parseDateStringAlt(String text) {
+        text = text.replace("T", " ").replace("Z", "");
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        return LocalDateTime.parse(text, formatter);
+    }
+
+    public static boolean dateParsableAlt(String text) {
+        try {
+            text = text.replace("T", " ").replace("Z", "");
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+            LocalDateTime.parse(text, formatter);
+            return true;
+        }
+        catch (Exception e) {
+            return false;
+        }
+    }
+
     public static boolean dateParsable(String text) {
         //06/Oct/13 11:01
         try {

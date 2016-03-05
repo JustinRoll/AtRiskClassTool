@@ -7,6 +7,7 @@ import gr.spinellis.ckjm.ClassMetrics;
 import org.apache.commons.configuration.ConfigurationException;
 import org.apache.commons.configuration.XMLConfiguration;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.ResetCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.internal.storage.file.FileRepository;
 import org.eclipse.jgit.lib.Repository;
@@ -41,7 +42,64 @@ public class Serializer {
                 fid, rid, firstReq?1:0, changed));
     }
 
-    public void serializeReqs(ArrayList<Requirement> reqs, HashMap<String, LocalDateTime> map) throws FileNotFoundException, UnsupportedEncodingException {
+    /* Open the file. Check all columns where the firstReq column is set to 1.
+        Create a new file with those at the beginning.
+        Put all other tickets at the end
+     */
+    public void splitFile(String fileName) throws IOException {
+        File inputBigTable = new File(fileName);
+        String FIRST_REQS = "temp_first_reqs.txt";
+        String LAST_REQS = "temp_last_reqs.txt";
+        PrintWriter firstReqs = new PrintWriter(FIRST_REQS);
+        PrintWriter lastReqs = new PrintWriter(LAST_REQS);
+        int firstCount = 0;
+        int total = 0;
+        final String FIRST_REQ = "First Req?";
+
+        BufferedReader reader = null;
+        TreeMap<String, String> commitMap = new TreeMap<String, String>();
+
+        reader = new BufferedReader(new FileReader(inputBigTable));
+        String text = null;
+        String headerLine = reader.readLine();
+        HashMap<String, Integer> header = CustomFileUtil.getHeader(headerLine);
+
+        while ((text = reader.readLine()) != null) {
+            String[] lineArray = text.split("\t");
+            if (lineArray[header.get(FIRST_REQ)].equals("1")) {
+                firstReqs.write(text);
+                firstCount++;
+            }
+            else {
+                lastReqs.write(text);
+                total++;
+            }
+        }
+        firstReqs.flush();
+        firstReqs.close();
+        lastReqs.flush();
+        lastReqs.close();
+        PrintWriter finalFile = new PrintWriter(String.format("%s_%d.txt", config.sonarProject[0], (int) ((100.0 * firstCount)/total)));
+
+        File firstReqsRead = new File(FIRST_REQS);
+        File lastReqsRead = new File(LAST_REQS);
+
+        BufferedReader firstReader = new BufferedReader(new FileReader(firstReqsRead));
+        BufferedReader lastReader = new BufferedReader(new FileReader(lastReqsRead));
+
+        finalFile.write(headerLine);
+        while ((text = firstReader.readLine()) != null) {
+            finalFile.write(text);
+        }
+        while ((text = lastReader.readLine()) != null) {
+            finalFile.write(text);
+        }
+        finalFile.flush();
+        finalFile.close();
+
+    }
+
+    public void serializeReqs(ArrayList<Requirement> reqs, HashMap<String, LocalDateTime> map, String extension) throws FileNotFoundException, UnsupportedEncodingException {
         PrintWriter reqWriter = new PrintWriter(config.reqMap, "UTF-8");
         PrintWriter fileWriter = new PrintWriter(config.fileMap, "UTF-8");
         PrintWriter writer = new PrintWriter(config.outReqFile, "UTF-8");
@@ -73,7 +131,7 @@ public class Serializer {
             }
 
 
-            for (String file : addChangedFiles(req.getGitMetadatas())) {
+            for (String file : addChangedFiles(req.getGitMetadatas(), extension)) {
                 int fid = fileCount;
 
                 lastTickets = lastTicketsQueueMap.get(file);
@@ -110,7 +168,7 @@ public class Serializer {
             }
 
 
-            for (String file: filterFiles(req, map)) {
+            for (String file: filterFiles(req, map, extension)) {
 
                 int fid = fileCount;
                 lastTickets = lastTicketsQueueMap.get(file);
@@ -183,6 +241,8 @@ public class Serializer {
 
         for (Map.Entry<String, String> fixVersion : fixVersions.entrySet()) {
             Git git = new Git(localRepo);
+            git.reset().setMode( ResetCommand.ResetType.HARD ).call();
+            Thread.sleep(1000);
             git.checkout().setName(fixVersion.getValue()).call();
              //pr = rt.exec(delNonJava, null, new File(String.format("%s/", config.gitRepo)));
             //System.out.println(delNonJava);
@@ -192,7 +252,7 @@ public class Serializer {
         fixWriter.close();
     }
 
-    public void copyFixVersions(TreeMap<String, String> fixVersions) throws IOException, ConfigurationException, GitAPIException, InterruptedException {
+    public void copyFixVersions(TreeMap<String, String> fixVersions, String extension) throws IOException, ConfigurationException, GitAPIException, InterruptedException {
 
 
         Repository localRepo = new FileRepository(config.gitRepo + "/.git");
@@ -200,13 +260,15 @@ public class Serializer {
 
         for (Map.Entry<String, String> fixVersion : fixVersions.entrySet()) {
             PrintWriter pw = new PrintWriter("../../rsync_temp");
-            String cpFix = "-avm --include='*.java' -f 'hide,! */' " + config.gitRepo + " " + config.fixDataDirectory;
+            String cpFix = "-avm --include='*" + extension + "' -f 'hide,! */' " + config.gitRepo + " " + config.fixDataDirectory;
             System.out.println(fixVersion.getValue());
             pw.write(cpFix + "/" + fixVersion.getKey());
             pw.close();
             Git git = new Git(localRepo);
+            git.reset().setMode( ResetCommand.ResetType.HARD ).call();
+            Thread.sleep(1000);
             git.checkout().setName(fixVersion.getValue()).call();
-            CustomFileUtil.copyAllExtension(config.gitRepo, config.fixDataDirectory + "/" + fixVersion.getKey(), ".java");
+            CustomFileUtil.copyAllExtension(config.gitRepo, config.fixDataDirectory + "/" + fixVersion.getKey(), extension);
 
         }
 
@@ -443,5 +505,110 @@ public class Serializer {
 
     public void convertArff() throws Exception {
         ARFFGenerator.convertFile(config.finalOutTable, config.finalOutArff);
+    }
+
+    public void serializeReqsUnorganized(ArrayList<Requirement> reqs, HashMap<String, LocalDateTime> map, String extension) throws FileNotFoundException, UnsupportedEncodingException {
+        PrintWriter reqWriter = new PrintWriter(config.reqMap, "UTF-8");
+        PrintWriter fileWriter = new PrintWriter(config.fileMap, "UTF-8");
+        PrintWriter writer = new PrintWriter(config.outReqFile, "UTF-8");
+        PrintWriter bugWriter = new PrintWriter(config.bugFile, "UTF-8");
+
+        String header = "Ticket|Last 10 Touched|Fix Version|Issue Type|Last Commit Time|Req Created|Commits|File|Requirement|First Req?|Changed?";
+        writer.write(header + "\n");
+
+        int reqCount = 0;
+        int fileCount = 0;
+        HashMap<String, Integer> fileMap = new HashMap<String, Integer>();
+        HashMap<String, Integer> reqMap = new HashMap<String, Integer>();
+        HashMap<String, ArrayBlockingQueue<String>> lastTicketsQueueMap = new HashMap<String, ArrayBlockingQueue<String>>();
+        Set<String> versions = new HashSet<String>();
+        ArrayBlockingQueue<String> lastTickets = null;
+        Collections.reverse(reqs);
+        System.out.println("Checking requirements");
+        for (Requirement req: reqs) {
+            System.out.printf("%s: %s\n", req.getId(), req.getJiraFields().get("Description").replaceAll("\n", " ") );
+        }
+        System.out.println("Done");
+
+        System.out.println(reqs.size());
+        for (Requirement req : reqs) {
+            Boolean firstReq = false;
+            boolean bug = "Bug".equals(req.getJiraFields().get("Issue Type"));
+            String reqText = req.getJiraFields().get("Description").replaceAll("\n", " ");
+            LocalDateTime lastCommit = getLastCommitTime(req.getGitMetadatas());
+
+            int rid = reqCount;
+            Set<String> files = addChangedFiles(req.getGitMetadatas(), extension);
+            System.out.printf("this many files: %d\n", files.size());
+            if (files.size() == 0)
+                System.out.println("SIZE ISSUE");
+
+            String combinedText = reqText + req.getId();
+            if (reqMap.get(combinedText) != null) {
+                rid = reqMap.get(combinedText);
+            }
+            else {
+                reqMap.put(combinedText, reqCount);
+                System.out.println(reqCount + " going up");
+                reqWriter.write(String.format("%d||%s\n", reqCount, reqText ));
+                reqCount++;
+            }
+
+            for (String file : addChangedFiles(req.getGitMetadatas(), extension)) {
+                int fid = fileCount;
+
+                lastTickets = lastTicketsQueueMap.get(file);
+                if (lastTickets == null) {
+                    lastTickets = new ArrayBlockingQueue<String>(10);
+                    lastTicketsQueueMap.put(file, lastTickets);
+                }
+
+                String last10 = String.join(",", Arrays.asList(lastTickets.toArray(new String[10])).stream().filter(f -> f != null)
+                        .collect(Collectors.toList()));
+
+                if (fileMap.get(file) != null) {
+                    fid = fileMap.get(file);
+                }
+                else {
+                    fileMap.put(file, fileCount);
+                    fileWriter.write(String.format("%d||%s\n", fileCount, file));
+                    fileCount++;
+                }
+
+
+                serializeReq(req, bug ? bugWriter : writer, lastCommit.toString(), last10, fid, rid, firstReq, 1);
+                lastTickets.offer(req.getId());
+                if (lastTickets.size() >= 10)
+                    lastTickets.poll();
+            }
+
+
+            for (String file: filterFiles(req, map, extension)) {
+
+                int fid = fileCount;
+                lastTickets = lastTicketsQueueMap.get(file);
+                if (lastTickets == null) {
+                    lastTickets = new ArrayBlockingQueue<String>(10);
+                    lastTicketsQueueMap.put(file, lastTickets);
+                }
+
+                String last10 = String.join(",", Arrays.asList(lastTickets.toArray(new String[10])).stream().filter(f -> f != null)
+                        .collect(Collectors.toList()));
+
+                if (fileMap.get(file) != null) {
+                    fid = fileMap.get(file);
+                }
+                else {
+                    fileMap.put(file, fileCount);
+                    fileWriter.write(String.format("%d||%s\n", fileCount, file));
+                    fileCount++;
+                }
+                serializeReq(req, bug?bugWriter:writer, lastCommit.toString(), last10, fid, rid, firstReq, 0);
+            }
+        }
+
+        reqWriter.close();
+        fileWriter.close();
+        writer.close();
     }
 }

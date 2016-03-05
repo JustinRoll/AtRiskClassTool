@@ -34,8 +34,7 @@ import static com.jroll.util.CKJMUtil.readDependencies;
 import static com.jroll.util.CustomFileUtil.*;
 import static com.jroll.util.ReportUtil.tabulate_report;
 import static com.jroll.util.ReportUtil.testSerializedFile;
-import static com.jroll.util.TextParser.getTicketId;
-import static com.jroll.util.TextParser.parseDateString;
+import static com.jroll.util.TextParser.*;
 import static org.kohsuke.args4j.ExampleMode.ALL;
 
 /**
@@ -63,12 +62,17 @@ public class MainDriver {
     private String RUN_STATICS_REPORT = "report_statics";
     private String STATIC_ANALYSIS = "statics";
     private String RUN_SIMILARITY = "similarity";
+    private String CUSTOM_PHP = "php";
     private String RUN_DUMB_BIGTABLE = "dumb";
     private String RUN_BIGTABLE = "big";
     private String RUN_ARFF = "arff";
     private String RUN_FIX = "fix";
     private String DEBUG_SONAR = "debug_sonar";
+    private String SONAR_PROPERTIES = "properties";
+    private String LANGUAGE = "java";
+
     private Boolean IS_SONAR = false;
+    private Boolean CREATE_SONAR_PROPERTIES = false;
 
     public final String FIX_ERRORS = "fix_errors.txt";
     FinalConfig config;
@@ -144,18 +148,22 @@ public class MainDriver {
 
         if (operations.contains(RUN_QUALITY_REPORT)) {
             tabulate_report(config);
-
         }
         if (operations.contains(RUN_REQS)) {
             analyzeReqs();
-
         }
         if (operations.contains(RUN_STATICS_REPORT)) {
             testSerializedFile(config);
         }
 
+        if (operations.contains(SONAR_PROPERTIES)) {
+            CREATE_SONAR_PROPERTIES = true;
+        }
+
+
+
         if (operations.contains(RUN_FIX)) {
-            serializeFixVersions();
+            serializeFixVersions("." + LANGUAGE);
         }
 
         if (operations.contains(DEBUG_SONAR)) {
@@ -164,6 +172,11 @@ public class MainDriver {
 
         if (operations.contains(STATIC_ANALYSIS)) {
             runStaticMetrics();
+        }
+
+        if (operations.contains(CUSTOM_PHP)) {
+            LANGUAGE = "php";
+            analyzeReqsUnorganized(100);
         }
 
         if (operations.contains(RUN_DUMB_BIGTABLE) || operations.contains(RUN_BIGTABLE)) {
@@ -208,7 +221,7 @@ public class MainDriver {
         Process pr = rt.exec(config.sonarCommand, null, new File(String.format("%s/", config.gitRepo)));
         printOutput(pr);
         int exitCode = pr.waitFor();
-        Thread.sleep(160000);
+
 
         //runCommand("sonar-runner", config.gitRepo);
         try {
@@ -232,65 +245,100 @@ public class MainDriver {
         return 0;
     }
 
-    /* Determine a fix version based on the current commit number.
-        Serialize the list of fix versions
+    /*
+        Given our requirement file, parse it into a map
      */
     public  void analyzeReqsUnorganized(int commitsPerRelease) throws Exception {
-        int releaseCount = 0;
-
+        int reqCount = 0;
         Serializer s = new Serializer(config);
         List<TreeMap<String, String>> jiraRows;
         if (config.jiraFile.contains(".xls"))
             jiraRows =  JiraExtractor.parseExcel(config.jiraFile);
         else
-            jiraRows = JiraExtractor.parseCSVToMap(config.jiraFile);
+            jiraRows = JiraExtractor.parseCSVToMapUnorganized(config.jiraFile);
 
-        System.out.println("Jira Data Done");
+        TreeMap<String, ArrayList<String>> commitToTicket = CustomFileUtil.readFileRev("drupal_data.csv", ",");
+        System.out.printf("Commits to ticket:%d\n", commitToTicket.size());
         /* Gather all commit data */
-        CommitData data = gatherCommits();
-        System.out.println("Commit Data Done");
+        CommitData data = gatherCommitsUnorganized(commitToTicket);
+        System.out.println("Commit Data Done Unorganized");
+        System.out.println(config.jiraFile);
         ArrayList<Requirement> reqs = new ArrayList<Requirement>();
         String firstFix = "0";
-
+        System.out.printf("Jira rows: %d\n", jiraRows.size());
         String cpFix = "cp -r " + config.gitRepo + " " + config.fixDataDirectory;
-
+        Set<String> usedTickets = new HashSet<String>();
 
         TreeMap<String, String> fixVersions = new TreeMap<String, String>();
+        //System.out.println(data.gitMetas);
 
         for (TreeMap<String, String> row : jiraRows) {
-            String ticketId = row.get("Key").replaceAll("[^0-9]", ""); //strip project name from ticket
-            if (data.gitMetas.get(ticketId) != null) {//Look up each mapped commit {
-
+            String ticketId = row.get("Key"); //strip project name from ticket
+            System.out.printf("Ticket: %s\n", ticketId);
+            if (data.gitMetas.get(ticketId) != null && !usedTickets.contains(ticketId)) {//Look up each mapped commit {
+                reqCount++;
+                usedTickets.add(ticketId);
                 Requirement req = new Requirement();
                 req.setJiraFields(row);
                 req.setId(row.get("Key"));
 
-                req.setCreateDate(parseDateString(row.get("Created")));
-                req.setGitMetadatas(data.gitMetas.get(ticketId));
-                reqs.add(req);
-                String fixVersion = req.getJiraFields().get("Fix Version/s").replaceAll(",", "_");
+                String dateText = row.get("Created");
+                if (dateParsable(dateText)) {
+                    req.setCreateDate(parseDateString(dateText));
+                } else if (dateParsableAlt(row.get("Created"))) {
+                    req.setCreateDate(parseDateStringAlt(dateText));
+                }
+                else {
 
-
-                if (fixVersions.get(fixVersion) == null) {
-                    String normalCommit = req.getGitMetadatas().get(0).getCommitId();
-                    String parentCommit = req.getGitMetadatas().get(0).getParent();
-                    System.out.printf("Parent commit: %s Original %s", normalCommit, parentCommit);
-                    fixVersions.put(fixVersion, parentCommit != null && parentCommit.length() > 1 ? parentCommit : normalCommit);
+                    req.setCreateDate(parseDateStringAmPm(dateText.replace(" AM", "").replace(" PM", "")));
                 }
 
+                req.setGitMetadatas(data.gitMetas.get(ticketId));
+                reqs.add(req);
+                String fixVersion = req.getJiraFields().get("Key");
+
+                String normalCommit = req.getGitMetadatas().get(0).getCommitId();
+                String parentCommit = req.getGitMetadatas().get(0).getParent();
+                    System.out.printf("Parent commit: %s Original %s", normalCommit, parentCommit);
+                    fixVersions.put(fixVersion, parentCommit != null && parentCommit.length() > 1 ? parentCommit : normalCommit);
+
                 //System.out.println("Found a match");
+            }
+            else {
+                boolean found = false;
+                for (ArrayList<String> value : commitToTicket.values()) {
+                    for (String item : value) {
+                        if (item.equals(ticketId)) {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                if (found)
+                    System.out.println("BAD BAD Could not find ticket:" + ticketId);
+                else
+                    System.out.println("Could not find ticket:" + ticketId);
             }
 
 
             //Check to see if there is a ticket match
         }
 
-        s.serializeFixVersions(fixVersions, firstFix);
-        s.copyFixVersions(fixVersions);
+        System.out.println("Checking Tickets");
+        for (ArrayList<String> ticketl : commitToTicket.values()) {
+            for (String ticket: ticketl)
+                System.out.println(ticket);
+        }
+        System.out.printf("Mapped Req count:%d\n", reqCount);
+        System.out.println("Done");
+        //s.serializeFixVersions(fixVersions, firstFix);
+        //s.copyFixVersions(fixVersions, "." + LANGUAGE);
+        System.out.println("Analyzing Commits");
         //analyzeCommits(fixVersions);
-        s.serializeReqs(reqs, data.fileCommitDates);
+        s.serializeReqsUnorganized(reqs, data.fileCommitDates, LANGUAGE);
         System.out.println("Serialization complete");
     }
+
 
 
 
@@ -351,18 +399,18 @@ public class MainDriver {
         }
 
         s.serializeFixVersions(fixVersions, firstFix);
-        s.copyFixVersions(fixVersions);
+        s.copyFixVersions(fixVersions, "." + LANGUAGE);
         //analyzeCommits(fixVersions);
-        s.serializeReqs(reqs, data.fileCommitDates);
+        s.serializeReqs(reqs, data.fileCommitDates, LANGUAGE);
         System.out.println("Serialization complete");
     }
 
 
-    public  void serializeFixVersions() throws Exception {
+    public  void serializeFixVersions(String extension) throws Exception {
 
         Serializer s = new Serializer(config);
 
-        s.copyFixVersions(CustomFileUtil.readFile(config.fixFile, ","));
+        s.copyFixVersions(CustomFileUtil.readFile(config.fixFile, ","), extension);
     }
 
 
@@ -481,6 +529,66 @@ public class MainDriver {
         return new CommitData(gitMetas, fileCommitDates);
     }
 
+    /* Gather commits. Read auxilary file to determine the ticket number for each commit*/
+    public CommitData gatherCommitsUnorganized (TreeMap<String, ArrayList<String>> commitToTicket) throws Exception {
+        int i = 0;
+        int ticketCount = 0;
+        Repository localRepo = new FileRepository(config.gitRepo + "/.git");
+        Runtime rt = Runtime.getRuntime();
+        HashMap<String, ArrayList<GitMetadata>> gitMetas = new HashMap<String, ArrayList<GitMetadata>>();
+        HashMap<String, LocalDateTime> fileCommitDates = new HashMap<String, LocalDateTime>();
+        Set<String> commitIds = new HashSet<String>();
+
+        rt.exec("rm " + config.gitRepo + "/.git/index.lock");
+
+        GitExtractor extractor = new GitExtractor(localRepo);
+        Iterable<RevCommit> commits = extractor.getAllCommits();
+
+        /* check out each commit. Get the number of parent commits */
+
+        for (RevCommit commit : commits) {
+            GitMetadata meta = new GitMetadata();
+            meta.setAuthor(commit.getAuthorIdent().getName());
+            meta.setCommitMessage(commit.getFullMessage());
+            meta.setCommitId(commit.getName().intern());
+            if (commit.getParentCount() > 0)
+                meta.setParent(commit.getParent(0).getName());
+
+            meta.setCommitDate(LocalDateTime.ofInstant(commit.getAuthorIdent().getWhen().toInstant(), ZoneId.systemDefault()));
+            meta.setChangedFiles(extractor.getChangedFiles(localRepo, commit));
+            meta.setAllFiles(extractor.getAllFiles(localRepo, commit, fileCommitDates));
+            if (i++ % 1000 == 0)
+                System.out.printf("Commit %d\n", i);
+
+
+            if (i > config.reqLimit && config.reqLimit > 0)
+                break;
+            ArrayList<String> tickets = commitToTicket.get(meta.getCommitId());
+
+            if (tickets != null) {
+                for (String ticket : tickets) {
+                    if (gitMetas.get(ticket) == null) {
+                        ticketCount++;
+                        System.out.println("this ticket should be in there " + ticket);
+                        ArrayList<GitMetadata> metaList = new ArrayList<GitMetadata>();
+                        gitMetas.put(ticket, metaList);
+                    }
+                    gitMetas.get(ticket).add(meta);
+                    commitIds.add(meta.getCommitId());
+                }
+            }
+
+        }
+        System.out.println("Checking parsed commits");
+        for (String commitId : commitToTicket.keySet()) {
+            if (!commitIds.contains(commitId)) {
+                System.out.println(commitId + "not in parsed commits");
+            }
+        }
+        System.out.printf("Here's the ticket count in gitMetas:%d\n",ticketCount);
+        return new CommitData(gitMetas, fileCommitDates);
+    }
+
     public TreeMap<String, String> getMissingVersions(TreeMap<String, ClassData> orig, TreeMap<String, String> fixes) {
 
         TreeMap<String, String> finalFixes = new TreeMap<String, String>();
@@ -510,7 +618,7 @@ public class MainDriver {
         for (Map.Entry<String, String> fixVersion : fixVersions.entrySet()) {
             System.out.printf("Fix:%s Commit:%s\n", fixVersion.getKey(), fixVersion.getValue());
             try {
-                ClassData metrics = analyzeCommit(git, fixVersion.getValue(), rt, ex);
+                ClassData metrics = analyzeCommit(git, fixVersion.getValue(), LANGUAGE, rt, ex);
                 FileOutputStream f_out = new
                         FileOutputStream(config.staticsFile);
 
@@ -587,7 +695,7 @@ public class MainDriver {
 
 
     /* perform static analysis for a single commit */
-    public ClassData analyzeCommit(Git git, String commit, Runtime rt,
+    public ClassData analyzeCommit(Git git, String commit, String language, Runtime rt,
                                              FindBugsExtractor ex) throws Exception {
         ArrayList<ArrayList<TreeMap>> finalMap = new ArrayList<ArrayList<TreeMap>>();
 
@@ -598,6 +706,8 @@ public class MainDriver {
         Thread.sleep(1000);
         git.checkout().setName(commit).call();
 
+        if (CREATE_SONAR_PROPERTIES)
+            CustomFileUtil.generateSonarProperties(config.gitRepo,config.sonarProject[0], commit, language);
 
         if (config.buildCommand != null && config.buildCommand != "") {
             System.out.println(config.buildCommand);
@@ -613,6 +723,7 @@ public class MainDriver {
             data.setSonarMetrics(runSonar(config, rt));
         }
         else {
+            System.out.println("Running cloc");
             runClocData(rt, data);
         }
 

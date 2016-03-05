@@ -57,15 +57,15 @@ sonar.language=java
 # Encoding of the source files
 sonar.sourceEncoding=UTF-8
      */
-    static File generateSonarProperties(String projectKey, String projectVersion, String language) throws FileNotFoundException, UnsupportedEncodingException {
-        String sonar = "sonar_project.properties";
+    public static File generateSonarProperties(String dir, String projectKey, String projectVersion, String language) throws FileNotFoundException, UnsupportedEncodingException {
+        String sonar = String.format("%s/sonar-project.properties", dir);
         PrintWriter writer = new PrintWriter(sonar, "UTF-8");
 
         String baseString = "sonar.projectKey=" + projectKey + "\n";
 
         baseString += "sonar.projectName=" + projectKey + "\n";
         baseString += "sonar.projectVersion=" + projectVersion + "\n";
-        baseString+= "sonar.srces=src\n";
+        baseString+= "sonar.sources=.\n";
         baseString+= "sonar.language=" + language + "\n";
         baseString+= "sonar.sourceEncoding=UTF-8\n";
 
@@ -230,6 +230,33 @@ sonar.sourceEncoding=UTF-8
 
     }
 
+    public static TreeMap<String, ArrayList<String>> readFileRev(String fileName, String delimiter) throws IOException {
+        File file = new File(fileName);
+        BufferedReader reader = null;
+        TreeMap<String, ArrayList<String>> commitMap = new TreeMap<String, ArrayList<String>>();
+
+        reader = new BufferedReader(new FileReader(file));
+        String text = null;
+
+        while ((text = reader.readLine()) != null) {
+
+            String[] line = text.split(delimiter);
+
+            if (line.length > 1) {
+                String ticket = line[0].trim();
+                String commit = line[1].trim();
+                if (!commitMap.containsKey(commit)) {
+                    commitMap.put(commit, new ArrayList<String>());
+                }
+
+                commitMap.get(commit).add(ticket);
+            }
+        }
+
+        return commitMap;
+
+    }
+
     public static String trimCustom(String inputPath, String replaceString) {
         int index = inputPath.indexOf(replaceString);
         return index >= 0 ? inputPath.substring(index) : inputPath;
@@ -258,6 +285,18 @@ sonar.sourceEncoding=UTF-8
 
     public static String getExtension(String fileName) {
         return fileName.substring(fileName.lastIndexOf(".") + 1, fileName.length());
+    }
+
+    /* return a map from the header line */
+    public static HashMap<String, Integer> getHeader(String line) {
+        String[] lineArray = line.split("\t");
+        HashMap<String, Integer> headerMap = new HashMap<String, Integer>();
+
+        for (int i = 0; i < lineArray.length; i++) {
+            headerMap.put(lineArray[i], i);
+        }
+
+        return headerMap;
     }
 
     /* read statics, run cloc metrics, read cloc metrics, read/run dependency info */

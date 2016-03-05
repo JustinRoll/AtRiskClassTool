@@ -61,6 +61,32 @@ public class JiraExtractor extends Extractor {
         return rowList;
     }
 
+    public static ArrayList<TreeMap<String, String>> parseCSVToMapUnorganized(String fileName) throws IOException {
+
+
+        CSVReader csvReader = new CSVReader(new FileReader(fileName));
+        //List<String[]> content = csvReader.readAll();
+        String[] header = csvReader.readNext();
+        String[] row = csvReader.readNext();
+        ArrayList<TreeMap<String, String>> rowList = new ArrayList<TreeMap<String, String>>();
+
+        while (row != null) {
+            int colIndex = 0;
+            TreeMap<String, String> rowMap = new TreeMap<String, String>();
+            for (String col : row) {
+                rowMap.put(header[colIndex], col);
+
+                colIndex++;
+                if (colIndex >= header.length)
+                    break;
+            }
+            row = csvReader.readNext();
+
+            rowList.add(rowMap);
+        }
+        return rowList;
+    }
+
     public static ArrayList<TreeMap<String, String>> parseExcel(String fileName) throws IOException, BiffException {
         Workbook workbook = Workbook.getWorkbook(new File(fileName));
         Sheet sheet = workbook.getSheet(1);

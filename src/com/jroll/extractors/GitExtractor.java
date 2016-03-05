@@ -222,12 +222,12 @@ public class GitExtractor extends Extractor {
                 .call();
         }
 
-    public static Set<String> addChangedFiles(ArrayList<GitMetadata> commits) {
+    public static Set<String> addChangedFiles(ArrayList<GitMetadata> commits, String extension) {
         ArrayList<String> fileList = new ArrayList<String>();
 
         for (GitMetadata commit : commits) {
 
-            fileList.addAll(commit.getChangedFiles().stream().filter(f -> "java".equals(getExtension(f))).collect(Collectors.toList()));
+            fileList.addAll(commit.getChangedFiles().stream().filter(f -> extension.equals(getExtension(f))).collect(Collectors.toList()));
         }
         return new HashSet<String>(fileList);
     }
@@ -245,16 +245,15 @@ public class GitExtractor extends Extractor {
 
 
     /* Filter out all files that were created AFTER the requirement time */
-    public static Set<String> filterFiles(Requirement req, HashMap<String, LocalDateTime> map) {
+    public static Set<String> filterFiles(Requirement req, HashMap<String, LocalDateTime> map, String extension) {
         Set<String> allFiles = new HashSet<String>();
         Set<String> changedFiles = new HashSet<String>();
-        String JAVA = "java";
 
         for (GitMetadata meta : req.getGitMetadatas()) {
             //System.out.println(meta.getChangedFiles());
             //System.out.println(meta.getAllFiles());
 
-            List<String> files = meta.getAllFiles().stream().filter(f -> JAVA.equals(getExtension(f).toLowerCase()) &&
+            List<String> files = meta.getAllFiles().stream().filter(f -> extension.equals(getExtension(f).toLowerCase()) &&
                     req.getCreateDate().isAfter(map.get(f))).collect(Collectors.toList());
             allFiles.addAll(files);
             changedFiles.addAll(meta.getChangedFiles());

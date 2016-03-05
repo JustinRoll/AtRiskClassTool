@@ -30,25 +30,30 @@ public class SonarWebApiImpl implements SonarWebApi {
     /* given a project, pull metrics for ALL classes
      * eg view-source:http://localhost:9000/api/resources?resource=ignite:ignite&depth=-1&scope=FIL&metrics=lines&format=json */
     public TreeMap<String, HashMap<String, Double>> getSonarMetrics() throws IOException, InterruptedException {
-        int argNumber = 0;
+        int longRetries = 0;
+        int MAX_LONG_RETRIES = 7;
         String response = "bad response";
         System.out.println(projectList.length);
 
-        while (!jsonParsable(response) && argNumber < projectList.length) {
-            String currProject = projectList[argNumber++];
-            System.out.printf("%s %d", response, argNumber);
-            String baseUrl = "%s/api/resources?resource=%s&depth=-1&scope=FIL&metrics=%s&format=json";
-            String finalUrl = String.format(baseUrl, sonarHost, currProject, String.join(",", metrics));
-            for (int i = 0; i < 4 && response.equals("bad response"); i++) {
-                try {
-                    response = sendGet(finalUrl);
-                    Thread.sleep(30000);
-                    System.out.println("Breaking out");
-                } catch (FileNotFoundException e) {
-                    System.out.println(e);
 
+        while (!jsonParsable(response) && longRetries++ < MAX_LONG_RETRIES) {
+            for (String currProject : projectList) {
+                String baseUrl = "%s/api/resources?resource=%s&depth=-1&scope=FIL&metrics=%s&format=json";
+                String finalUrl = String.format(baseUrl, sonarHost, currProject, String.join(",", metrics));
+                for (int i = 0; i < 4 && response.equals("bad response"); i++) {
+                    try {
+                        response = sendGet(finalUrl);
+                        Thread.sleep(1000);
+                        System.out.println("Breaking out");
+                    } catch (FileNotFoundException e) {
+                        System.out.println(e);
+
+                    }
                 }
+
             }
+            if (!jsonParsable(response))
+                Thread.sleep(100000);
         }
 
         return JsonParserForSonarApiResponses.parseClassMetrics(response);

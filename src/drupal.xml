@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<config>
+    <bug_file>
+        demo_bugs.txt
+    </bug_file>
+    <static_analysis_command>
+        /Users/jroll/dev/sonar-runner-2.4/bin/sonar-runner
+    </static_analysis_command>
+    <cloc_command>
+        /Users/jroll/Downloads/cloc-1.64/cloc ~/dev/thesis/qpid-java/ --by-file --csv --out=/Users/jroll/IdeaProjects/Thesis/src/cloc.csv
+    </cloc_command>
+    <cloc_file>
+        /Users/jroll/IdeaProjects/Thesis/src/drupal_cloc.csv
+    </cloc_file>
+    <fix_data_dir>
+        /Users/jroll/Downloads/demo_data/
+    </fix_data_dir>
+    <out_req_file>
+        demo_outOnlyReq.txt
+    </out_req_file>
+    <req_map>
+        demo_reqMap.txt
+    </req_map>
+    <file_map>
+        demo_fileMap.txt
+    </file_map>
+    <fix_file>
+        demo_fix.txt
+    </fix_file>
+    <first_fix_file>
+        demo_first_fix.csv
+    </first_fix_file>
+    <final_out_table>
+        demo_big_table.txt
+    </final_out_table>
+    <final_out_arff>
+        demo_big_table.arff
+    </final_out_arff>
+    <find_bugs_relative>
+        /target/findbugsXml.xml
+    </find_bugs_relative>
+    <git_repo>
+        /Users/jroll/dev/thesis/dd-Drupal
+    </git_repo>
+    <jira_file>
+        /Users/jroll/IdeaProjects/Thesis/src/drupal_new.csv
+    </jira_file>
+    <jira_directory>
+        /Users/jroll/dev/thesis/dd-Drupal
+    </jira_directory>
+    <jira_url>
+        https://issues.apache.org/jira/sr/jira.issueviews:searchrequest-excel-all-fields/temp/SearchRequest.xls?jqlQuery=project+%3D+demo
+    </jira_url>
+    <req_limit>
+        0
+    </req_limit>
+    <statics_file>
+        demo_statics2.txt
+    </statics_file>
+    <subproject>broker-core</subproject>
+
+    <req_similarity>
+        ReqSimilarity_new.csv
+    </req_similarity>
+
+    <code_similarity>
+        CodeSimilarity_new.csv
+    </code_similarity>
+    <sonar_host>
+        http://localhost:9000
+    </sonar_host>w
+    <sonar_project>
+        demo
+    </sonar_project>
+    <sonar_metrics>
+        complexity,conditions_to_cover,branch_coverage,line_coverage,lines_to_cover,SMELL_COUNT_NON_EXCEPTION,critical_violations,major_violations,violations,SMELL_DEBT,ncloc
+    </sonar_metrics>
+    <sonar_command>
+        /Users/jroll/dev/sonar-runner-2.4/bin/sonar-runner
+    </sonar_command>
+
+
+</config>
