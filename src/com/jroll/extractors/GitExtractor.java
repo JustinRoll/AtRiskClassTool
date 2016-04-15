@@ -140,7 +140,7 @@ public class GitExtractor extends Extractor {
                 while (tw.next()) {
                     list.add(tw.getPathString());
                 }
-                System.out.println("full tree walk");
+
             } else {
                 RevCommit parent = rw.parseCommit(commit.getParent(0).getId());
                 ObjectReader reader = repository.newObjectReader();

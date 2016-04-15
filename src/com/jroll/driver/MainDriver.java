@@ -52,9 +52,20 @@ public class MainDriver {
     @Option(name="-cpr",usage="number of commits per release",metaVar="OUTPUT")
     private int cpr = -1;
 
+    @Option(name="-split", usage="split file")
+    private String splitFile = null;
     // receives other command line parameters than options
+
+    @Option(name="-arff", usage="arff custom file")
+    private String arff;
+
+    @Option(name="-join", usage="join together some serialized files")
+    private String joinFiles = null;
+
     @Argument
     private List<String> operations = new ArrayList<String>();
+
+
 
     private String RUN_REQS = "reqs";
     private String RUN_JIRA = "jira";
@@ -67,17 +78,22 @@ public class MainDriver {
     private String RUN_BIGTABLE = "big";
     private String RUN_ARFF = "arff";
     private String RUN_FIX = "fix";
+    private String RUN_TWEAKS = "tweaks";
     private String DEBUG_SONAR = "debug_sonar";
     private String SONAR_PROPERTIES = "properties";
     private String LANGUAGE = "java";
+    private String REPORT_FREQUENCY = "report_freq";
+    private String REPORT_RELEASES = "report_releases";
+    private String REPORT_REQS = "report_reqs";
+    private String SET_EXCLUDE_MISSING = "exclude_missing";
+    private String DELETE_NOTOUCH_REQS = "delete_notouch";
 
     private Boolean IS_SONAR = false;
     private Boolean CREATE_SONAR_PROPERTIES = false;
+    private Boolean EXCLUDE_MISSING = true;
 
     public final String FIX_ERRORS = "fix_errors.txt";
     FinalConfig config;
-
-
 
     public TreeMap<String, ClassData> runStaticMetrics() throws Exception {
 
@@ -133,6 +149,13 @@ public class MainDriver {
         config = new FinalConfig(initialConfig);
         Serializer serializer = new Serializer(config);
 
+        if (operations.contains(CUSTOM_PHP)) {
+            LANGUAGE = "php";
+            //analyzeReqsUnorganized(100);
+        }
+
+
+
         if (operations.contains(DEBUG_SONAR) || operations.contains("sonar"))
             IS_SONAR = true;
 
@@ -155,10 +178,14 @@ public class MainDriver {
         if (operations.contains(RUN_STATICS_REPORT)) {
             testSerializedFile(config);
         }
+        if (operations.contains("clean")) {
+            ReportUtil.cleanSerializedFile(config, LANGUAGE);
+        }
 
         if (operations.contains(SONAR_PROPERTIES)) {
             CREATE_SONAR_PROPERTIES = true;
         }
+
 
 
 
@@ -174,33 +201,58 @@ public class MainDriver {
             runStaticMetrics();
         }
 
-        if (operations.contains(CUSTOM_PHP)) {
-            LANGUAGE = "php";
-            analyzeReqsUnorganized(100);
-        }
+
 
         if (operations.contains(RUN_DUMB_BIGTABLE) || operations.contains(RUN_BIGTABLE)) {
 
-            TreeMap<String, ClassData> fixToClassData = runStaticMetrics();
+            TreeMap<String, ClassData> fixToClassData = readClasses(config.staticsFile);
             if (operations.contains(RUN_DUMB_BIGTABLE)) {
                 System.out.println("Running DUMB big table routine...");
-                serializer.runBigTableDumb(fixToClassData);
+                serializer.runBigTableNew(fixToClassData, LANGUAGE, EXCLUDE_MISSING);
+                if (operations.contains(DELETE_NOTOUCH_REQS))
+                    serializer.deleteNoTouch();
             }
             else {
                 serializer.runBigTable(fixToClassData);
             }
 
         }
+        if (splitFile != null) {
+           serializer.splitFile(config, splitFile);
+        }
+        if (joinFiles != null) {
+            ReportUtil.joinSerializedFiles(joinFiles.split(","), config);
+        }
 
-        if (operations.contains(RUN_ARFF)) {
+        if (operations.contains(RUN_ARFF) || arff != null) {
             System.out.println("Running ARFF routine...");
-            serializer.convertArff();
+            serializer.convertArff(arff);
+        }
+
+        if (operations.contains(RUN_TWEAKS)) {
+            System.out.println("Running tweaks");
+            serializer.runTweaks(config);
+
+        }
+
+        if (operations.contains(REPORT_FREQUENCY)) {
+            ReportUtil.reportFreqs(config);
+        }
+
+        if (operations.contains(REPORT_RELEASES)) {
+            ReportUtil.reportReleases(config, LANGUAGE);
+        }
+
+        if (operations.contains(REPORT_REQS)) {
+            ReportUtil.reportRequirements(config, LANGUAGE);
         }
 
 
     }
 
-
+    private TreeMap<String, ClassData> loadSerializedMetrics() {
+        return null;
+    }
 
 
     private void debugSonar(FinalConfig config) throws IOException, ConfigurationException, InterruptedException {
@@ -310,6 +362,7 @@ public class MainDriver {
                     for (String item : value) {
                         if (item.equals(ticketId)) {
                             found = true;
+                            System.out.println("breaking");
                             break;
                         }
                     }
@@ -334,8 +387,8 @@ public class MainDriver {
         //s.serializeFixVersions(fixVersions, firstFix);
         //s.copyFixVersions(fixVersions, "." + LANGUAGE);
         System.out.println("Analyzing Commits");
-        //analyzeCommits(fixVersions);
-        s.serializeReqsUnorganized(reqs, data.fileCommitDates, LANGUAGE);
+        analyzeCommits(fixVersions);
+        //s.serializeReqsUnorganized(reqs, data.fileCommitDates, LANGUAGE);
         System.out.println("Serialization complete");
     }
 
@@ -359,6 +412,7 @@ public class MainDriver {
             jiraRows = JiraExtractor.parseCSVToMap(config.jiraFile);
 
         System.out.println("Jira Data Done");
+        System.out.printf("%d jira rows\n", jiraRows.size());
         /* Gather all commit data */
         CommitData data = gatherCommits();
         System.out.println("Commit Data Done");
@@ -370,7 +424,9 @@ public class MainDriver {
         TreeMap<String, String> fixVersions = new TreeMap<String, String>();
 
         for (TreeMap<String, String> row : jiraRows) {
-            String ticketId = row.get("Key").replaceAll("[^0-9]", ""); //strip project name from ticket
+            System.out.println(row.get("Key"));
+            String ticketId = getTicketId(row.get("Key")); //strip project name from ticket
+            System.out.println("New ticketId " + ticketId);
             if (data.gitMetas.get(ticketId) != null) {//Look up each mapped commit {
 
                 Requirement req = new Requirement();
@@ -380,6 +436,7 @@ public class MainDriver {
                 req.setCreateDate(parseDateString(row.get("Created")));
                 req.setGitMetadatas(data.gitMetas.get(ticketId));
                 reqs.add(req);
+                System.out.println("Adding ticket " + ticketId);
                 String fixVersion = req.getJiraFields().get("Fix Version/s").replaceAll(",", "_");
                 if (firstFix == null)
                     firstFix = fixVersion;
@@ -392,15 +449,16 @@ public class MainDriver {
                 }
 
                 //System.out.println("Found a match");
-        }
+            }
 
 
             //Check to see if there is a ticket match
         }
 
         s.serializeFixVersions(fixVersions, firstFix);
-        s.copyFixVersions(fixVersions, "." + LANGUAGE);
+        //s.copyFixVersions(fixVersions, "." + LANGUAGE);
         //analyzeCommits(fixVersions);
+        System.out.printf("final req size:%d\n", reqs.size());
         s.serializeReqs(reqs, data.fileCommitDates, LANGUAGE);
         System.out.println("Serialization complete");
     }
@@ -488,8 +546,6 @@ public class MainDriver {
         HashMap<String, ArrayList<GitMetadata>> gitMetas = new HashMap<String, ArrayList<GitMetadata>>();
         HashMap<String, LocalDateTime> fileCommitDates = new HashMap<String, LocalDateTime>();
 
-        FindBugsExtractor ex = new FindBugsExtractor(String.format("%s/%s/", config.gitRepo, config.subProject), config.findBugsRelative);
-
         rt.exec("rm " + config.gitRepo + "/.git/index.lock");
 
         GitExtractor extractor = new GitExtractor(localRepo);
@@ -508,13 +564,15 @@ public class MainDriver {
             meta.setCommitDate(LocalDateTime.ofInstant(commit.getAuthorIdent().getWhen().toInstant(), ZoneId.systemDefault()));
             meta.setChangedFiles(extractor.getChangedFiles(localRepo, commit));
             meta.setAllFiles(extractor.getAllFiles(localRepo, commit, fileCommitDates));
-            if (i++ % 1000 == 0)
+            if (i++ % 1000 == 0) {
                 System.out.printf("Commit %d\n", i);
+            }
 
 
            if (i > config.reqLimit && config.reqLimit > 0)
                 break;
             String ticketId = getTicketId(meta.getCommitMessage().toLowerCase());
+            System.out.printf("ticketId: %s message:%s\n", ticketId, meta.getCommitMessage().replaceAll("\n", " "));
 
             if (ticketId != null) {
                 if (gitMetas.get(ticketId) == null) {
@@ -612,7 +670,7 @@ public class MainDriver {
         Git git = new Git(localRepo);
         TreeMap<String, ClassData> statics = new TreeMap<String, ClassData>();
         int i = 0;
-        TreeMap<String, String> fixVersions = getMissingVersions(readClasses(config), initialfixVersions);
+        TreeMap<String, String> fixVersions = getMissingVersions(readClasses(config.staticsFile), initialfixVersions);
         PrintWriter pw = new PrintWriter(FIX_ERRORS);
 
         for (Map.Entry<String, String> fixVersion : fixVersions.entrySet()) {
@@ -637,7 +695,7 @@ public class MainDriver {
         }
         System.out.println("static metrics");
 
-        serializeStatic(statics);
+        serializeStatic(config, statics);
         System.out.println(readStatics(config.staticsFile));
         return statics;
     }
@@ -648,8 +706,8 @@ public class MainDriver {
     /* Serialize static metrics to a file. We need to check the .ser file and see if
         it has already been completed.
      */
-    private void serializeStatic(TreeMap<String, ClassData> statics) {
-        TreeMap<String, ClassData> origMetrics = readClasses(config);
+    public static void serializeStatic(FinalConfig config, TreeMap<String, ClassData> statics) {
+        TreeMap<String, ClassData> origMetrics = readClasses(config.staticsFile);
         for (Map.Entry<String, ClassData> entry: statics.entrySet()) {
             origMetrics.put(entry.getKey(), entry.getValue());
         }
@@ -672,10 +730,10 @@ public class MainDriver {
     }
 
     /* Read the list of classes serialized from file */
-    public static TreeMap<String, ClassData>  readClasses(FinalConfig config) {
+    public static TreeMap<String, ClassData>  readClasses(String fileName) {
         TreeMap<String, ClassData> classes = null;
         try {
-            ObjectInputStream fileIn = new ObjectInputStream(new FileInputStream(config.staticsFile));
+            ObjectInputStream fileIn = new ObjectInputStream(new FileInputStream(fileName));
             try {
                 classes = (TreeMap<String, ClassData>) fileIn.readObject();
             }
@@ -683,6 +741,7 @@ public class MainDriver {
                 System.out.println("Error reading class file");
                 System.out.println(e);
             }
+            fileIn.close();
 
         }
         catch(IOException  e) {

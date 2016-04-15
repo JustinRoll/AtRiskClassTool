@@ -22,6 +22,7 @@ import static com.jroll.driver.MainDriver.getStaticCount;
 import static com.jroll.extractors.GitExtractor.addChangedFiles;
 import static com.jroll.extractors.GitExtractor.filterFiles;
 import static com.jroll.extractors.GitExtractor.getLastCommitTime;
+import static com.jroll.util.CustomFileUtil.getHeader;
 import static com.jroll.util.CustomFileUtil.readStatics;
 import static com.jroll.util.CustomFileUtil.trimCustom;
 
@@ -46,8 +47,8 @@ public class Serializer {
         Create a new file with those at the beginning.
         Put all other tickets at the end
      */
-    public void splitFile(String fileName) throws IOException {
-        File inputBigTable = new File(fileName);
+    public void splitFile(FinalConfig config, String splitName) throws IOException {
+        File inputBigTable = new File(config.finalOutTable);
         String FIRST_REQS = "temp_first_reqs.txt";
         String LAST_REQS = "temp_last_reqs.txt";
         PrintWriter firstReqs = new PrintWriter(FIRST_REQS);
@@ -67,11 +68,11 @@ public class Serializer {
         while ((text = reader.readLine()) != null) {
             String[] lineArray = text.split("\t");
             if (lineArray[header.get(FIRST_REQ)].equals("1")) {
-                firstReqs.write(text);
+                firstReqs.write(text + "\n");
                 firstCount++;
             }
             else {
-                lastReqs.write(text);
+                lastReqs.write(text + "\n");
                 total++;
             }
         }
@@ -79,7 +80,7 @@ public class Serializer {
         firstReqs.close();
         lastReqs.flush();
         lastReqs.close();
-        PrintWriter finalFile = new PrintWriter(String.format("%s_%d.txt", config.sonarProject[0], (int) ((100.0 * firstCount)/total)));
+        PrintWriter finalFile = new PrintWriter(String.format("%s_%f.txt", splitName, ((100.0 * firstCount)/total)));
 
         File firstReqsRead = new File(FIRST_REQS);
         File lastReqsRead = new File(LAST_REQS);
@@ -87,12 +88,12 @@ public class Serializer {
         BufferedReader firstReader = new BufferedReader(new FileReader(firstReqsRead));
         BufferedReader lastReader = new BufferedReader(new FileReader(lastReqsRead));
 
-        finalFile.write(headerLine);
+        finalFile.write(headerLine + "\n");
         while ((text = firstReader.readLine()) != null) {
-            finalFile.write(text);
+            finalFile.write(text + "\n");
         }
         while ((text = lastReader.readLine()) != null) {
-            finalFile.write(text);
+            finalFile.write(text + "\n");
         }
         finalFile.flush();
         finalFile.close();
@@ -104,6 +105,7 @@ public class Serializer {
         PrintWriter fileWriter = new PrintWriter(config.fileMap, "UTF-8");
         PrintWriter writer = new PrintWriter(config.outReqFile, "UTF-8");
         PrintWriter bugWriter = new PrintWriter(config.bugFile, "UTF-8");
+        PrintWriter noExt = new PrintWriter(config.noExt, "UTF-8");
 
         String header = "Ticket|Last 10 Touched|Fix Version|Issue Type|Last Commit Time|Req Created|Commits|File|Requirement|First Req?|Changed?";
         writer.write(header + "\n");
@@ -115,13 +117,17 @@ public class Serializer {
         HashMap<String, ArrayBlockingQueue<String>> lastTicketsQueueMap = new HashMap<String, ArrayBlockingQueue<String>>();
         Set<String> versions = new HashSet<String>();
         ArrayBlockingQueue<String> lastTickets = null;
+        List<Requirement> newReqs = reqs.stream().filter(r ->  !reqs.get(0).getJiraFields().get("Fix Version/s").equals(r.getJiraFields().get("Fix Version/s").trim()))
+                .collect(Collectors.toList());
 
-        for (Requirement req : reqs.stream().filter(r -> reqs.size() > 0 && !reqs.get(0).equals(r.getJiraFields().get("Fix Version/s").trim()))
-                .collect(Collectors.toList())) {
+        System.out.printf("Reqs vs new Reqs: %d %d\n", reqs.size(), newReqs.size());
+
+        for (Requirement req : reqs) {
             Boolean firstReq = false;
             boolean bug = "Bug".equals(req.getJiraFields().get("Issue Type"));
             String reqText = req.getJiraFields().get("Description").replaceAll("\n", " ");
             LocalDateTime lastCommit = getLastCommitTime(req.getGitMetadatas());
+            Set<String> changedFiles = addChangedFiles(req.getGitMetadatas(), extension);
 
             int rid = reqCount;
 
@@ -130,8 +136,10 @@ public class Serializer {
                 firstReq = true;
             }
 
+            if (changedFiles.size() == 0)
+                noExt.write(req.getId() + "\n");
 
-            for (String file : addChangedFiles(req.getGitMetadatas(), extension)) {
+            for (String file : changedFiles) {
                 int fid = fileCount;
 
                 lastTickets = lastTicketsQueueMap.get(file);
@@ -379,11 +387,280 @@ public class Serializer {
 
     }
 
+
+    public static String buildLine(ArrayList<Object> values) {
+        String[] converted = new String[values.size()];
+        int count = 0;
+        String finalLine;
+
+        for (Object val : values) {
+            String strVal;
+            if (val instanceof Integer) {
+
+                strVal = String.format("%d", (Integer) val);
+            }
+            else if (val instanceof Double || val instanceof Float) {
+                Double dVal = (Double) val;
+                dVal = dVal.isNaN() ? 0 : dVal;
+                strVal = String.format("%.5f", (Double) dVal);
+            }
+            else if (val instanceof String) {
+                strVal = (String) val;
+                strVal = strVal.replaceAll(",", "");
+                strVal = strVal.equals("") ? "?" : strVal;
+                strVal = strVal.equals("NaN") ? "0" : strVal;
+            }
+            else {
+                Boolean b = (Boolean) val;
+                if (b == null) {
+                    strVal = "?";
+                }
+                else {
+                    strVal = b ? "true" : "false";
+                }
+            }
+            converted[count++] = strVal;
+        }
+        return String.join("\t", converted) + "\n";
+    }
+
+    public void runBigTableNew(TreeMap<String, ClassData> fixToClassData, String language, boolean excludeMissing) throws IOException {
+        String currentReqLine = null;
+        String currentCodeLine = null;
+
+        //TreeMap<String, TreeMap<String, Integer>> staticMap = readStatics(config.staticsFile);
+        TreeMap<String, Integer> frequencyMap = new TreeMap<String, Integer>();
+        TreeMap<String, List<AbstractMap.SimpleEntry<Integer,LocalDateTime>>> frequencyByDate = new TreeMap<String, List<AbstractMap.SimpleEntry<Integer,LocalDateTime>>>();
+
+        //This field will map a class to its frequency of change
+        Integer ticketCount = 0;
+        String prevTicket = null;
+        PrintWriter writer = new PrintWriter(config.finalOutTable);
+        System.out.println("\nlanguage " + language + "\n");
+        File file = new File(config.outReqFile);
+        File reqSims = new File(config.reqSimilarity);
+        File codeSims = new File(config.codeSimilarity);
+
+        BufferedReader reader = null;
+        BufferedReader reqSimReader = new BufferedReader(new FileReader(reqSims));
+        BufferedReader codeSimReader = new BufferedReader(new FileReader(codeSims));
+
+        //Map of header item to array index
+        HashMap<String, Integer> headerMap = new HashMap<String, Integer>();
+        TreeMap<String, String> fileMap = CustomFileUtil.readFile(config.fileMap, "\\|\\|");
+        TreeMap<String, String> trimmedFileMap = new TreeMap<String, String>();
+
+        for (Map.Entry<String, String> entry : fileMap.entrySet()) {
+            trimmedFileMap.put(entry.getKey(), trimCustom(entry.getValue(), "org/apache"));
+        }
+        System.out.println(" file map \n" + fileMap.toString());
+        System.out.println(" trimmed file map" + trimmedFileMap.toString());
+        System.out.println(fixToClassData);
+        reader = new BufferedReader(new FileReader(file));
+        String headerLine = reader.readLine();
+        String[] mainHeader = headerLine.split("\\|");
+        String[] vsmHeader = reqSimReader.readLine().split("\\|");
+        String[] codeSimHeader = codeSimReader.readLine().split("\\|");
+        String[] sonarHeader = config.sonarMetrics;
+        String[] historyHeader = {"simple", "logarithmic", "linear"};
+
+
+
+        ArrayList<Object> headerList = new ArrayList<Object>();
+
+        for (int i = 0; i < mainHeader.length; i++) {
+            headerMap.put(mainHeader[i], i);
+        }
+        String text = null;
+
+        String[] ckjmHeader = {"ckjm_noc","ckjm_wmc","ckjm_rfc","ckjm_cbo","ckjm_dit","ckjm_lcom","ckjm_ca","ckjm_npm"};
+        HashSet<String> missing = new HashSet<String>();
+        HashSet<String> added = new HashSet<String>();
+        //Load initial line
+        //Load code history
+        //Load req history
+        //Load History Scores
+        //Load SonarQube Metrics
+        //Load CKJM
+        //Write file
+        for (int i = 0; i < mainHeader.length - 1; i++) {
+            headerList.add(mainHeader[i]);
+        }
+        for (String s : codeSimHeader) {
+            headerList.add("code_sim_" + s);
+        }
+        for (String s : vsmHeader) {
+            headerList.add("req_sim_" + s);
+        }
+        for (String hist : historyHeader) {
+            headerList.add(hist);
+        }
+        for (String qube : sonarHeader) {
+            headerList.add(qube);
+        }
+
+        if (language.equals("java")) {
+            for (String ckjm : ckjmHeader) {
+                headerList.add(ckjm);
+            }
+        }
+        headerList.add(mainHeader[mainHeader.length - 1]);
+        System.out.println(headerList);
+
+        String finishLine = buildLine(headerList);
+        writer.write(finishLine);
+
+
+
+        int count = 0;
+        while ((text = reader.readLine()) != null && (currentCodeLine = codeSimReader.readLine()) != null && (currentReqLine = reqSimReader.readLine()) != null) {
+            ArrayList<Object> values = new ArrayList<Object>();
+            //System.out.println(text);
+            count++;
+            //System.out.println(text);
+
+            String[] line = text.replaceAll("\t", " ").split("\\|");
+            String fix = line[headerMap.get("Fix Version")];
+            if (!language.equals("java") && (fix == null || fix.equals("Fix Version/s")))
+                fix = line[0];
+            String changed  = line[headerMap.get("Changed?")].trim();
+
+            ClassData currentFix = fixToClassData.get(fix);
+
+            if (currentFix == null) {
+                System.out.println(String.format("fix: %s", fix));
+                missing.add(fix);
+                continue;
+            }
+            else {
+                //System.out.println("fix found!");
+                added.add(fix);
+            }
+
+
+            if (!line[0].equals(prevTicket)) {
+                ticketCount++;
+            }
+            if (ticketCount % 10 == 0)
+                System.out.printf("%d tickets done and %d requirements\n", ticketCount, count);
+
+            prevTicket = line[0];
+
+            String className = trimmedFileMap.get(line[7]);
+            //System.out.println(className);
+            //System.out.println(frequencyMap);
+            Integer freq = frequencyMap.get(className) == null ? 0 : frequencyMap.get(className);
+
+            //System.out.println("got here");
+
+            if (frequencyByDate.get(className) == null)
+                frequencyByDate.put(className, new ArrayList<AbstractMap.SimpleEntry<Integer, LocalDateTime>>());
+
+            double baseHistory = Math.min(1.0, freq / (1.0 * ticketCount));
+            double logHistory = HistoryCalculator.getLogHistory(ticketCount, frequencyByDate.get(className));
+            double wtHistory = HistoryCalculator.getWeightedHistory(ticketCount, frequencyByDate.get(className));
+
+            if (changed.equals("1")) {
+                frequencyMap.put(className, freq + 1);
+
+                List<AbstractMap.SimpleEntry<Integer, LocalDateTime>> dateFreqs = frequencyByDate.get(className);
+                LocalDateTime lastCommitTime = TextParser.parseDateStringAlt(line[headerMap.get("Last Commit Time")]);
+                dateFreqs.add(new AbstractMap.SimpleEntry<Integer, LocalDateTime>(ticketCount, lastCommitTime));
+                //System.out.println(line[0] + " " + line[7] + "freq increase");
+            }
+
+
+            HashMap<String, Double> sonars = currentFix.getSonarMetrics().get(className);
+            if (sonars == null || sonars.size() < 1) {
+                sonars = new HashMap<String, Double>();
+            }
+            //System.out.println("Here is the class name");
+            //System.out.println(className);
+            String indexedClassName = className.replaceAll(".java", "").replaceAll("/", ".");
+            indexedClassName = indexedClassName.contains("src.org.apache")?indexedClassName.substring(indexedClassName.indexOf("src.org.apache")):indexedClassName;
+
+            ClassMetrics cm = currentFix.getCkjmMetrics().get(indexedClassName);
+            if (cm == null) {
+                //System.out.println("got here new class metrics");
+                cm = new ClassMetrics();
+            }
+
+            //System.out.println("indexed class name: " + indexedClassName);
+            String[] codeSim = currentCodeLine.split("\\|");
+            //Load CodeSimilarity Scores
+            String endVal = "yes";
+
+            for (int i = 0; i < line.length; i++) {
+                if (i == 1) {
+                    line[i].replaceAll(",", " ");
+                    values.add("\"" + line[i] + "\"");
+                }
+                else if (i == line.length - 1) {
+                    endVal = line[line.length - 1];
+                    endVal = endVal.equals("1")?"yes":"no";
+                }
+                else {
+                    values.add(line[i]);
+                }
+            }
+
+            for (String sim : codeSim) {
+                values.add(sim);
+            }
+            String[] reqSim = currentReqLine.split("\\|");
+            for (String req : reqSim) {
+                values.add(req);
+            }
+            //Load initial line
+            //load code sim
+            //load req sim
+            //Load History Scores
+            //Load SonarQube Metrics
+            //Load CKJM
+            //Load initial line
+            //Write file
+
+
+                Double[] scores = {baseHistory, logHistory, wtHistory};
+
+                for (double score : scores)
+                    values.add(score);
+
+                //for (double qube : currentFix.getSonarMetrics().get(className).values())
+                //    values.add(qube);
+                for (String s : sonarHeader) {
+                    Double val = sonars.get(s);
+                    values.add(val);
+                }
+                if (language.equals("java")) {
+                    Integer[] ckjmValues = {cm.getNoc(),
+                            cm.getWmc(), cm.getRfc(), cm.getCbo(), cm.getDit(), cm.getLcom(), cm.getCa(), cm.getNpm()};
+                    for (Integer ckjmVal : ckjmValues)
+                        values.add(ckjmVal);
+                }
+
+                values.add(endVal);
+                finishLine = buildLine(values);
+                if (!excludeMissing || (excludeMissing && !finishLine.contains("?")))
+                    writer.write(finishLine);
+
+
+        }
+        System.out.println("got here");
+        System.out.println(missing);
+        System.out.println(missing.size());
+        System.out.println("Added");
+        System.out.println(added);
+        System.out.println(added.size());
+        writer.flush();
+        writer.close();
+    }
+
     /* for this method, we will just open up each similarity file and tack on the columns to our output file */
     public void runBigTableDumb(TreeMap<String, ClassData> fixToClassData) throws Exception {
         String currentReqLine = null;
         String currentCodeLine = null;
-        TreeMap<String, TreeMap<String, Integer>> staticMap = readStatics(config.staticsFile);
+        //TreeMap<String, TreeMap<String, Integer>> staticMap = readStatics(config.staticsFile);
         TreeMap<String, Integer> frequencyMap = new TreeMap<String, Integer>();
         TreeMap<String, List<AbstractMap.SimpleEntry<Integer,LocalDateTime>>> frequencyByDate = new TreeMap<String, List<AbstractMap.SimpleEntry<Integer,LocalDateTime>>>();
 
@@ -416,6 +693,7 @@ public class Serializer {
         String[] mainHeader = reader.readLine().split("|");
         String[] vsmHeader = reqSimReader.readLine().split(",");
         String[] codeSimHeader = codeSimReader.readLine().split(",");
+        String[] sonarHeader = config.sonarMetrics;
 
         for (int i = 0; i < mainHeader.length; i++) {
             headerMap.put(mainHeader[i], i);
@@ -428,15 +706,19 @@ public class Serializer {
         HEADER += String.join("\t", vsmHeader);
         HEADER += "\t" + String.join("\t", codeSimHeader);
         HEADER += "\t" + ckjmHeader;
-        HEADER += "\tloc\t";
+        //HEADER += "\tloc\t"; just got rid of this
+        HEADER += String.join("\t", sonarHeader) + "\t";
         HEADER += "Changed?\n";
+
+        HashMap<String, Integer> header = getHeader(HEADER.replace("\t", ","));
         writer.write(HEADER);
 
         int count = 0;
         while ((text = reader.readLine()) != null && (currentCodeLine = codeSimReader.readLine()) != null && (currentReqLine = reqSimReader.readLine()) != null) {
             count++;
             String[] line = text.replaceAll("\t", " ").split("\\|");
-            String fix = line[2];
+            String fix = line[headerMap.get("Fix Version")];
+            String changed  = line[headerMap.get("Changed?")].trim();
 
             ClassData currentFix = fixToClassData.get(fix);
 
@@ -448,7 +730,7 @@ public class Serializer {
 
             String className = trimmedFileMap.get(line[7]);
             Integer freq = frequencyMap.get(className) == null ? 0 : frequencyMap.get(className);
-            if (line[9].trim().equals("1")) {
+            if (changed.equals("1")) {
                 frequencyMap.put(className, freq + 1);
                 if (frequencyByDate.get(className) == null)
                     frequencyByDate.put(className, new ArrayList<AbstractMap.SimpleEntry<Integer, LocalDateTime>>());
@@ -457,11 +739,11 @@ public class Serializer {
                 dateFreqs.add(new AbstractMap.SimpleEntry<Integer, LocalDateTime>(ticketCount, lastCommitTime));
                 //System.out.println(line[0] + " " + line[7] + "freq increase");
             }
-
+            int staticCount = 0; //fix this
             double baseHistory = Math.min(1.0, freq / ticketCount);
             double logHistory = HistoryCalculator.getLogHistory(ticketCount, frequencyByDate.get(className));
             double wtHistory = HistoryCalculator.getWeightedHistory(ticketCount, frequencyByDate.get(className));
-            int staticCount = getStaticCount(line[2], className, staticMap);
+
             String last10 = line[1].replaceAll(",", " ");
             String firstFields = String.format("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%.5f\t", line[0], last10, line[2].replaceAll(",", "|"), line[3], line[4], line[5], line[6], line[7], line[8], staticCount, baseHistory);
 
@@ -499,12 +781,11 @@ public class Serializer {
         }
         writer.flush();
         writer.close();
-
     }
 
 
-    public void convertArff() throws Exception {
-        ARFFGenerator.convertFile(config.finalOutTable, config.finalOutArff);
+    public void convertArff(String file) throws Exception {
+        ARFFGenerator.convertFile(file == null ? config.finalOutTable : file, config.finalOutArff, config.subProject);
     }
 
     public void serializeReqsUnorganized(ArrayList<Requirement> reqs, HashMap<String, LocalDateTime> map, String extension) throws FileNotFoundException, UnsupportedEncodingException {
@@ -610,5 +891,114 @@ public class Serializer {
         reqWriter.close();
         fileWriter.close();
         writer.close();
+    }
+
+
+    public ArrayList<Object> tweakVals(Boolean header, String text, int firstReqIndex) {
+        String[] fields = text.split("\t");
+        ArrayList<Object> vals = new ArrayList<Object>();
+        vals = new ArrayList<Object>();
+        String firstReq = null;
+        String changed = fields[fields.length - 1];
+
+
+        for (int i = 0; i < fields.length; i++) {
+            if (i == firstReqIndex) {
+                firstReq = fields[firstReqIndex];
+            }
+            else if (i != fields.length - 1){
+                vals.add(fields[i]);
+            }
+        }
+        vals.add(firstReq);
+        if (header)
+            vals.add(changed);
+        else
+            vals.add(changed.equals("yes") ? 1 : 0);
+        return vals;
+    }
+    /*  last_req, a, b, c, d, no
+        a, b, c, d, last_req, yes
+
+        Open the file again. Put the First Req? column second to last.
+        Then replace the "yes" in the last column with a 1, no with a 0
+     */
+    public void runTweaks(FinalConfig config) throws IOException {
+        String FINAL_STRING = config.finalOutTable.substring(0, config.finalOutTable.indexOf(".")) + "_final.txt";
+        PrintWriter fileWriter = new PrintWriter(FINAL_STRING, "UTF-8");
+        File f = new File(config.finalOutTable);
+        BufferedReader reader = new BufferedReader(new FileReader(f));
+        String text = reader.readLine();
+        String[] headerText = text.split("\n");
+        HashMap<String, Integer> header = getHeader(text);
+        String finalLine = null;
+
+        int firstReqIndex = header.get("First Req?");
+
+
+        writeLine(fileWriter, tweakVals(true, text, firstReqIndex));
+
+        while ((text = reader.readLine()) != null) {
+
+
+            header.put("First Req?", header.keySet().size() - 2);
+
+
+            writeLine(fileWriter, tweakVals(false, text, firstReqIndex));
+
+        }
+        fileWriter.flush();
+        fileWriter.close();
+
+    }
+
+    private void writeLine(PrintWriter fileWriter, ArrayList<Object> objects) {
+        fileWriter.write(buildLine(objects));
+    }
+
+    public void deleteNoTouch() throws IOException {
+        File readFile = new File(config.finalOutTable);
+        BufferedReader reader = new BufferedReader(new FileReader(readFile));
+        File writeFile = new File("temp_file_table");
+        BufferedWriter writer = new BufferedWriter(new FileWriter(writeFile));
+        HashSet<String> noTouchTickets = new HashSet<String>();
+        HashSet<String> totalTickets = new HashSet<String>();
+        String text = reader.readLine(); //skip header
+        int touched = 0;
+        String prevTicket = null;
+
+        while ((text = reader.readLine()) != null) {
+            String[] lineArr = text.split("\t");
+            String ticket = lineArr[0].trim();
+
+            totalTickets.add(ticket);
+
+            if (prevTicket != null && !ticket.equals(prevTicket)) {
+                if (touched == 0) {
+                    //System.out.println(prevTicket);
+                    noTouchTickets.add(prevTicket);
+                }
+                touched = 0;
+
+            }
+
+            if ("yes".equals(lineArr[lineArr.length - 1].trim())) {
+                touched++;
+                //System.out.println("got yes");
+            }
+            prevTicket = ticket;
+
+        }
+
+        reader.close();
+        reader = new BufferedReader(new FileReader(readFile));
+        while ((text = reader.readLine()) != null) {
+            String[] lineArr = text.split("\t");
+            String ticket = lineArr[0].trim();
+            if (!noTouchTickets.contains(ticket))
+                writer.write(text + "\n");
+        }
+        writer.close();
+        writeFile.renameTo(readFile);
     }
 }

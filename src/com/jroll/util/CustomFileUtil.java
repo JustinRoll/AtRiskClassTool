@@ -12,6 +12,7 @@ import java.util.TreeMap;
 import java.nio.file.*;
 
 import static com.jroll.driver.MainDriver.readClasses;
+import static java.lang.Math.toIntExact;
 import static java.nio.file.StandardCopyOption.*;
 import java.nio.file.attribute.*;
 import static java.nio.file.FileVisitResult.*;
@@ -155,6 +156,22 @@ sonar.sourceEncoding=UTF-8
         EnumSet<FileVisitOption> opts = EnumSet.of(FileVisitOption.FOLLOW_LINKS);
         TreeCopier tc = new TreeCopier(source, dest, extension);
         Files.walkFileTree(source, opts, Integer.MAX_VALUE, tc);
+    }
+
+    public static Integer filesInPath(String path, String extension) throws IOException {
+        Integer count = 0;
+
+        Object[] paths = Files.walk(Paths.get(path)).toArray();
+        for (Object filePath : paths) {
+            Path realPath = (Path) filePath;
+            if (realPath.toString().endsWith(extension)) {
+                count++;
+            }
+            else {
+                //System.out.println("Not a java file " + realPath.toString());
+            }
+        }
+        return count;
     }
     public static String trimSlash(String f) {
         return f.toString().substring(0, f.toString().lastIndexOf("/"));

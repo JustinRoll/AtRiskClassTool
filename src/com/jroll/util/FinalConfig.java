@@ -43,6 +43,8 @@ public class FinalConfig {
 
     public String jiraUrl;
 
+    public String language = "java";
+
     public Integer reqLimit;
 
     public String reqSimilarity;
@@ -61,6 +63,8 @@ public class FinalConfig {
 
     public String sonarCommand;
     public String firstFix;
+
+    public String noExt;
 
 
     public FinalConfig(XMLConfiguration config) {
@@ -91,6 +95,8 @@ public class FinalConfig {
         this.sonarProject = config.getStringArray("sonar_project");
         this.sonarMetrics = config.getStringArray("sonar_metrics");
         this.sonarCommand = config.getString("sonar_command");
+
+        this.noExt = config.getString("no_ext");
     }
     /*
             <build_command>
