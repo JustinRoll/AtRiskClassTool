@@ -90,4 +90,19 @@ public class TextParser {
 
         return allMatches.size() > 0 ? allMatches.get(0) : null;
     }
+
+    public static String getTicketId(String concreteLine, String project) {
+        List<String> allMatches = new ArrayList<String>();
+        String regex = String.format(".*%s-([0-9]+).*", project);
+
+        System.out.println(regex);
+        Pattern pattern = Pattern.compile(regex);
+        Matcher matcher = pattern.matcher(concreteLine);
+
+        while (matcher.find()) {
+            allMatches.add(matcher.group(1));
+        }
+
+        return allMatches.size() > 0 ? allMatches.get(0) : null;
+    }
 }

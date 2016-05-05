@@ -10,7 +10,6 @@ import com.jroll.extractors.JiraExtractor;
 import com.jroll.sonar.SonarWebApiImpl;
 import com.jroll.util.*;
 import gr.spinellis.ckjm.ClassMetrics;
-import org.apache.commons.collections4.bidimap.AbstractDualBidiMap;
 import org.apache.commons.configuration.ConfigurationException;
 import org.apache.commons.configuration.XMLConfiguration;
 import org.eclipse.jgit.api.Git;
@@ -29,7 +28,6 @@ import java.time.ZoneId;
 import java.util.*;
 
 import static com.jroll.command.CommandExecutor.printOutput;
-import static com.jroll.command.CommandExecutor.runCommand;
 import static com.jroll.util.CKJMUtil.readDependencies;
 import static com.jroll.util.CustomFileUtil.*;
 import static com.jroll.util.ReportUtil.tabulate_report;
@@ -51,6 +49,9 @@ public class MainDriver {
 
     @Option(name="-cpr",usage="number of commits per release",metaVar="OUTPUT")
     private int cpr = -1;
+
+    @Option(name="-fhist",usage="output a modification report for a file",metaVar="OUTPUT")
+    private String fhist = null;
 
     @Option(name="-split", usage="split file")
     private String splitFile = null;
@@ -85,6 +86,8 @@ public class MainDriver {
     private String REPORT_FREQUENCY = "report_freq";
     private String REPORT_RELEASES = "report_releases";
     private String REPORT_REQS = "report_reqs";
+    private String REPORT_LINKS = "report_links";
+    private String REPORT_EXTENSION = "extension_report";
     private String SET_EXCLUDE_MISSING = "exclude_missing";
     private String DELETE_NOTOUCH_REQS = "delete_notouch";
 
@@ -173,7 +176,10 @@ public class MainDriver {
             tabulate_report(config);
         }
         if (operations.contains(RUN_REQS)) {
-            analyzeReqs();
+            if (!LANGUAGE.equals(CUSTOM_PHP))
+                analyzeReqs();
+            else
+                analyzeReqsUnorganized(1000);
         }
         if (operations.contains(RUN_STATICS_REPORT)) {
             testSerializedFile(config);
@@ -212,9 +218,6 @@ public class MainDriver {
                 if (operations.contains(DELETE_NOTOUCH_REQS))
                     serializer.deleteNoTouch();
             }
-            else {
-                serializer.runBigTable(fixToClassData);
-            }
 
         }
         if (splitFile != null) {
@@ -245,6 +248,27 @@ public class MainDriver {
 
         if (operations.contains(REPORT_REQS)) {
             ReportUtil.reportRequirements(config, LANGUAGE);
+        }
+
+        if (fhist != null) {
+            ArrayList<Requirement> reqs = analyzeReqs();
+            ReportUtil.reportChangeHistoryClass(fhist, reqs);
+        }
+        if (operations.contains("report_change")) {
+            ArrayList<Requirement> reqs = analyzeReqs();
+            ReportUtil.reportChangeHistoryAll(reqs, LANGUAGE);
+        }
+        if (operations.contains(REPORT_LINKS)) {
+            ArrayList<Requirement> reqs = LANGUAGE.equals("java") ? analyzeReqs() : analyzeReqsUnorganized(1000);
+            ReportUtil.reportLinks(reqs, LANGUAGE);
+        }
+
+        if (operations.contains(REPORT_EXTENSION)) {
+            System.out.println("ext report");
+            Repository localRepo = new FileRepository(config.gitRepo + "/.git");
+
+            GitExtractor extractor = new GitExtractor(localRepo);
+            extractor.changedFileReport();
         }
 
 
@@ -300,7 +324,7 @@ public class MainDriver {
     /*
         Given our requirement file, parse it into a map
      */
-    public  void analyzeReqsUnorganized(int commitsPerRelease) throws Exception {
+    public ArrayList<Requirement> analyzeReqsUnorganized(int commitsPerRelease) throws Exception {
         int reqCount = 0;
         Serializer s = new Serializer(config);
         List<TreeMap<String, String>> jiraRows;
@@ -384,12 +408,13 @@ public class MainDriver {
         }
         System.out.printf("Mapped Req count:%d\n", reqCount);
         System.out.println("Done");
-        //s.serializeFixVersions(fixVersions, firstFix);
+        s.serializeFixVersions(fixVersions, firstFix);
         //s.copyFixVersions(fixVersions, "." + LANGUAGE);
-        System.out.println("Analyzing Commits");
-        analyzeCommits(fixVersions);
-        //s.serializeReqsUnorganized(reqs, data.fileCommitDates, LANGUAGE);
+        //System.out.println("Analyzing Commits");
+        //analyzeCommits(fixVersions);
+        s.serializeReqsUnorganized(reqs, data.fileCommitDates, LANGUAGE);
         System.out.println("Serialization complete");
+        return reqs;
     }
 
 
@@ -398,11 +423,11 @@ public class MainDriver {
 
     /*
         Get numbers of times the current class has changed
-        Filter out stuff that doesn't include org.apache.qpid
+
             -
      */
 
-    public  void analyzeReqs() throws Exception {
+    public ArrayList<Requirement> analyzeReqs() throws Exception {
 
         Serializer s = new Serializer(config);
         List<TreeMap<String, String>> jiraRows;
@@ -425,7 +450,7 @@ public class MainDriver {
 
         for (TreeMap<String, String> row : jiraRows) {
             System.out.println(row.get("Key"));
-            String ticketId = getTicketId(row.get("Key")); //strip project name from ticket
+            String ticketId = getTicketId(row.get("Key"), config.ticketPrefix); //strip project name from ticket
             System.out.println("New ticketId " + ticketId);
             if (data.gitMetas.get(ticketId) != null) {//Look up each mapped commit {
 
@@ -461,6 +486,8 @@ public class MainDriver {
         System.out.printf("final req size:%d\n", reqs.size());
         s.serializeReqs(reqs, data.fileCommitDates, LANGUAGE);
         System.out.println("Serialization complete");
+
+        return reqs;
     }
 
 
@@ -571,7 +598,7 @@ public class MainDriver {
 
            if (i > config.reqLimit && config.reqLimit > 0)
                 break;
-            String ticketId = getTicketId(meta.getCommitMessage().toLowerCase());
+            String ticketId = getTicketId(meta.getCommitMessage().toLowerCase(), config.ticketPrefix.toLowerCase());
             System.out.printf("ticketId: %s message:%s\n", ticketId, meta.getCommitMessage().replaceAll("\n", " "));
 
             if (ticketId != null) {

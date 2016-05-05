@@ -3,6 +3,7 @@ package com.jroll.util;
 import com.jroll.data.ClassData;
 import com.jroll.data.CommitData;
 import com.jroll.data.GitMetadata;
+import com.jroll.data.Requirement;
 import com.jroll.extractors.GitExtractor;
 import com.jroll.extractors.JiraExtractor;
 import gr.spinellis.ckjm.ClassMetrics;
@@ -245,5 +246,126 @@ Report on how many classes contain valid values.
 
         }
 
+    public static void reportChangeHistoryClass(String className, ArrayList<Requirement> reqs) throws IOException {
+        /*
+           Look up all requirements that modified the class
+           Output each requirement ticket Id and Text
+         */
+        ArrayList<Requirement> filtered = new ArrayList<Requirement>();
+        for (Requirement req : reqs) {
+            ArrayList<GitMetadata> metas = req.getGitMetadatas();
+
+            for (GitMetadata meta : metas) {
+                if (meta.getChangedFiles().contains(className) && !filtered.contains(req)) {
+
+                    filtered.add(req);
+                    continue;
+                }
+
+            }
+        }
+
+        for (Requirement req : filtered) {
+            String[] fileArray = req.getChangedFiles().toArray(new String[req.getChangedFiles().size()]);
+            for (int i = 0; i < fileArray.length; i++)
+                fileArray[i] = fileArray[i].contains("/") ? fileArray[i].substring(fileArray[i].lastIndexOf("/") + 1) : fileArray[i];
+            System.out.println("\tRequirement");
+            System.out.printf("\t\t%s : %s\n", req.getId(), req.getCreateDate().toString());
+            System.out.printf("\t\t\t%s\n", String.join(",", fileArray));
+            System.out.printf("\t\t\t\t%s\n", req.getJiraFields().get("Description").replaceAll("\n", "\\\\"));
+        }
+    }
+
+    public static void reportChangeHistoryAll(ArrayList<Requirement> reqs, String ext) throws FileNotFoundException {
+        /*  Linked list of frequencies.
+            Maintain a map of change histories.
+            if something changes twice in a row
+                output
+
+         */
+        PrintWriter p = new PrintWriter("changehist.txt");
+        TreeMap<String, Integer[]> historyMap = new TreeMap();
+        MyMap<String, Integer> currentStreak = new MyMap();
+        Requirement prevReq = null;
+        HashSet<String> allFiles = new HashSet<String>();
+
+        for (Requirement req : reqs) {
+
+            for (String file : req.getCurrentFilesInRepo(ext)) {
+                allFiles.add(file);
+            }
+            for (String file : req.getChangedFiles())
+                allFiles.add(file);
+        }
+
+
+        for (Requirement req : reqs) {
+            //String[] fileArray = req.getChangedFiles().toArray(new String[req.getChangedFiles().size()]);
+            for (String file : allFiles) {
+                if (req.getChangedFiles().contains(file)) {
+                    currentStreak.incMap(file);
+                }
+                else {
+                    currentStreak.put(file, 0);
+                }
+                Integer inARow = (Integer) currentStreak.get(file);
+                if (inARow > 12) {
+                    inARow = 1;
+                    currentStreak.put(file, 0);
+                }
+                    System.out.printf("%s %d", file, currentStreak.get(file));
+                incArray(historyMap, file, inARow);
+
+            }
+        }
+        String[] header = {"Class", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"};
+        p.write(String.format("%s\n", String.join(",", header)));
+        for (Map.Entry<String, Integer[]> entry: historyMap.entrySet()) {
+
+            String[] intString = new String[13];
+
+            for (int i = 0; i < intString.length; i++) {
+                intString[i] = String.format("%d", entry.getValue()[i]);
+            }
+            p.write(String.format("%s,%s\n", entry.getKey(), String.join(",", intString)));
+        }
+
+        p.flush();
+        p.close();
+    }
+
+    public static void incArray(TreeMap<String, Integer[]> currentStreak, String file, Integer numberToIncrement) {
+        Integer[] changesInARow = currentStreak.get(file);
+
+        if (changesInARow == null) {
+            changesInARow = new Integer[13];
+            for (int i = 0; i < changesInARow.length; i++) {
+                changesInARow[i] = 0;
+            }
+            currentStreak.put(file, changesInARow);
+        }
+        if (numberToIncrement < 13) {
+            changesInARow[numberToIncrement]++;
+            if (numberToIncrement > 1 && changesInARow[numberToIncrement - 1] > 0)
+                changesInARow[numberToIncrement - 1]--;
+        }
+
+
+    }
+
+    public static void reportLinks(ArrayList<Requirement> reqs, String language) {
+        System.out.printf("Links: %d\n", reqs.size());
+        long linkedFileReqs = reqs.stream().filter(req -> containsLang(req, language)).count();
+        System.out.printf("Links with ext: %d\n", linkedFileReqs);
+    }
+
+    private static Boolean containsLang(Requirement req, String language) {
+        for (String f : req.getChangedFiles()) {
+            if (f.endsWith(language))
+                return true;
+        }
+
+        return false;
+    }
 }
 

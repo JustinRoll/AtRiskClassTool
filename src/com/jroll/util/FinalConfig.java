@@ -66,8 +66,12 @@ public class FinalConfig {
 
     public String noExt;
 
+    public String ticketPrefix;
+
+
 
     public FinalConfig(XMLConfiguration config) {
+        this.ticketPrefix = config.getString("ticket_prefix");
         this.bugFile = config.getString("bug_file");
         this.buildCommand = config.getString("build_command");
         this.staticAnalysisCommand = config.getString("static_analysis_command");

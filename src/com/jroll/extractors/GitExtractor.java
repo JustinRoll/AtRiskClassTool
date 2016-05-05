@@ -2,6 +2,7 @@ package com.jroll.extractors;
 
 import com.jroll.data.GitMetadata;
 import com.jroll.data.Requirement;
+import com.jroll.util.TextParser;
 import org.codehaus.plexus.util.StringUtils;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.errors.GitAPIException;
@@ -261,6 +262,30 @@ public class GitExtractor extends Extractor {
 
         System.out.println(allFiles.size());
         return new HashSet<String>(allFiles.stream().filter(f -> !changedFiles.contains(f)).collect(Collectors.toList()));
+    }
+
+    public void changedFileReport() throws Exception {
+        TreeMap<String, Integer> extMap = new TreeMap<String, Integer>();
+        int commitCount = 0;
+        for (RevCommit commit : getAllCommits()) {
+            Set<String> addedExtensions = new HashSet<String>();
+            for (String file : getChangedFiles(repo, commit)) {
+                String ext = getExtension(file);
+                if (!addedExtensions.contains(ext)) {
+                    if (extMap.get(ext) == null)
+                        extMap.put(ext, 0);
+                    extMap.put(ext, extMap.get(ext) + 1);
+                    addedExtensions.add(ext);
+                }
+            }
+            commitCount++;
+        }
+        // now report
+        System.out.println("Total commits " + commitCount);
+        System.out.println("----------------------");
+        for (Map.Entry<String, Integer> entry : extMap.entrySet()) {
+            System.out.printf("Extension:%s, Commits:%d\n", entry.getKey(), entry.getValue());
+        }
     }
 
     }

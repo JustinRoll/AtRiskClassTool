@@ -238,7 +238,7 @@ public class Serializer {
         a directory name of .24, .26
          */
 
-        firstFixWriter.write(firstFix);
+        //firstFixWriter.write(firstFix);
         System.out.println(config.fixDataDirectory);
         //String cpFix = "cp -r " + config.gitRepo + " " + config.fixDataDirectory;
 
@@ -248,10 +248,10 @@ public class Serializer {
         Runtime rt = Runtime.getRuntime();
 
         for (Map.Entry<String, String> fixVersion : fixVersions.entrySet()) {
-            Git git = new Git(localRepo);
-            git.reset().setMode( ResetCommand.ResetType.HARD ).call();
-            Thread.sleep(1000);
-            git.checkout().setName(fixVersion.getValue()).call();
+            //Git git = new Git(localRepo);
+            //git.reset().setMode( ResetCommand.ResetType.HARD ).call();
+            //Thread.sleep(1000);
+            //git.checkout().setName(fixVersion.getValue()).call();
              //pr = rt.exec(delNonJava, null, new File(String.format("%s/", config.gitRepo)));
             //System.out.println(delNonJava);
 
@@ -279,111 +279,6 @@ public class Serializer {
             CustomFileUtil.copyAllExtension(config.gitRepo, config.fixDataDirectory + "/" + fixVersion.getKey(), extension);
 
         }
-
-    }
-
-    public void runBigTable(TreeMap<String, ClassData> fixToClassData) throws Exception {
-
-        TreeMap<String, TreeMap<String, Integer>> staticMap = readStatics(config.staticsFile);
-        TreeMap<String, Integer> frequencyMap = new TreeMap<String, Integer>();
-
-        //This field will map a class to its frequency of change
-        float ticketCount = 0.0f;
-        String prevTicket = null;
-        PrintWriter writer = new PrintWriter(config.finalOutTable);
-
-
-        File file = new File(config.reqMap);
-        File sims = new File(config.similarityFile);
-        TreeMap<String, TreeMap<String, Double>> scores = CustomFileUtil.readVsm(sims);
-
-        BufferedReader reader = null;
-        TreeMap<String, String> commitMap = new TreeMap<String, String>();
-        HashMap<String, Integer> headerMap = new HashMap<String, Integer>();
-        TreeMap<String, String> fileMap = CustomFileUtil.readFile(config.fileMap, "\\|\\|");
-        TreeMap<String, String> trimmedFileMap = new TreeMap<String, String>();
-
-        for (Map.Entry<String, String> entry : fileMap.entrySet()) {
-            trimmedFileMap.put(entry.getKey(), trimCustom(entry.getValue(), "org/apache"));
-        }
-        System.out.println(fileMap.toString() + " file map");
-        System.out.println(trimmedFileMap.toString() + " trimmed file map");
-        reader = new BufferedReader(new FileReader(file));
-        String[] header = reader.readLine().split("|");
-
-        for (int i = 0; i < header.length; i++) {
-            headerMap.put(header[i], i);
-        }
-        String text = null;
-
-        String ckjmHeader = "ckjm_noc\tckjm_wmc\tckjm_rfc\tckjm_cbo\tckjm_dit\tckjm_lcom\tckjm_ca\tckjm_npm";
-
-        String HEADER = "Ticket\tLast 10\tFix Version\tIssue Type\tLast Commit Time\tReq Created\tCommits\tFile\tRequirement\tBugCount\tChangeHistory\t";
-        HEADER += "Vsm_MaxSimilarity\tVsm_AverSimilarity\tJsd_MaxSimilarity\tJsd_AverSimilarity\tCmJcn_MaxSimilarity\tCmJcn_AverSimilarity\tGreedyRes_MaxSimilarity\tGreedyRes_AverSimilarity\tBleuLinMaxSimilarity\tBleuLin_AverSimilarity\tOptWup_MaxSimilarity\tOptWup_AverSimilarity\t";
-        HEADER += ckjmHeader;
-        HEADER += "\tloc\t";
-        HEADER += "Changed?\n";
-        writer.write(HEADER);
-
-        int count = 0;
-        while ((text = reader.readLine()) != null) {
-            count++;
-            String[] line = text.replaceAll("\t", " ").split("\\|");
-            String fix = line[2];
-            System.out.println(fix);
-            ClassData currentFix = fixToClassData.get(fix);
-
-
-            if (!line[0].equals(prevTicket)) {
-                ticketCount++;
-            }
-            prevTicket = line[0];
-
-            String className = trimmedFileMap.get(line[7]);
-            Integer freq = frequencyMap.get(className) == null ? 0 : frequencyMap.get(className);
-            if (line[9].trim().equals("1")) {
-                frequencyMap.put(className, freq + 1);
-                System.out.println(line[0] + " " + line[7] + "freq increase");
-            }
-            else {
-                System.out.println(line[0] + " " + line[7] + " freq same");
-            }
-            int staticCount = getStaticCount(line[2], className, staticMap);
-            String last10 = line[1].replaceAll(",", " ");
-            String firstFields = String.format("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%.5f\t", line[0], last10, line[2].replaceAll(",", "|"), line[3], line[4], line[5], line[6], line[7], line[8], staticCount, Math.min(1.0, freq / ticketCount));
-            String[] lsmHeader = "Vsm_MaxSimilarity,Vsm_AverSimilarity,Jsd_MaxSimilarity,Jsd_AverSimilarity,CmJcn_MaxSimilarity,CmJcn_AverSimilarity,GreedyRes_MaxSimilarity,GreedyRes_AverSimilarity,BleuLinMaxSimilarity,BleuLin_AverSimilarity,OptWup_MaxSimilarity,OptWup_AverSimilarity".split(",");
-            System.out.println(fixToClassData);
-            System.out.println(currentFix);
-            ClassMetrics cm = currentFix.getCkjmMetrics().get(className.replaceAll(".java", "").replaceAll("/", "."));
-            Integer loc = currentFix.getLinesOfCode().get(className);
-            System.out.println(className);
-            String ckjmMetrics = "";
-            if (cm != null) {
-                ckjmMetrics += String.format("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d", cm.getNoc(),
-                        cm.getWmc(), cm.getRfc(), cm.getCbo(), cm.getDit(), cm.getLcom(), cm.getCa(), cm.getNpm());
-
-            }
-            else {
-                //"ckjm_noc\tckjm_wmc\tckjm_rfc\tckjm_cbo\tckjm_dit\tckjm_lcom\tckjm_ca\tckjm_npm";
-                ckjmMetrics += "-1\t-1\t-1\t-1\t-1\t-1\t-1\t-1";
-            }
-            ckjmMetrics += String.format("\t%d", loc != null ? loc : -1);
-
-            for (int i = 0; i < 12; i++) {
-                firstFields += String.format("% .5f\t", scores.get(line[0]).get(lsmHeader[i]));
-            }
-            firstFields += ckjmMetrics;
-            firstFields +=String.format("\t%s\n", line[9].equals("1") ? "y" : "n");
-            /*
-            Vsm_MaxSimilarity,Vsm_AverSimilarity,Jsd_MaxSimilarity,Jsd_AverSimilarity,CmJcn_MaxSimilarity,CmJcn_AverSimilarity,GreedyRes_MaxSimilarity,GreedyRes_AverSimilarity,BleuLinMaxSimilarity,BleuLin_AverSimilarity,OptWup_MaxSimilarity,OptWup_AverSimilarity
-             */
-            //Ticket|Last 10|Fix Version|Issue Type|Last Commit Time|Req Created|Commits|File|Requirement|BugCount|ChangeHistory|Changed?
-            if (trimmedFileMap.get(line[7]).contains("qpid") && loc != null && loc > 0 && cm != null) {
-                writer.write(firstFields);
-            }
-        }
-        writer.flush();
-        writer.close();
 
     }
 
@@ -521,7 +416,7 @@ public class Serializer {
 
             String[] line = text.replaceAll("\t", " ").split("\\|");
             String fix = line[headerMap.get("Fix Version")];
-            if (!language.equals("java") && (fix == null || fix.equals("Fix Version/s")))
+            //if (!language.equals("java") && (fix == null || fix.equals("Fix Version/s")))
                 fix = line[0];
             String changed  = line[headerMap.get("Changed?")].trim();
 
@@ -656,132 +551,6 @@ public class Serializer {
         writer.close();
     }
 
-    /* for this method, we will just open up each similarity file and tack on the columns to our output file */
-    public void runBigTableDumb(TreeMap<String, ClassData> fixToClassData) throws Exception {
-        String currentReqLine = null;
-        String currentCodeLine = null;
-        //TreeMap<String, TreeMap<String, Integer>> staticMap = readStatics(config.staticsFile);
-        TreeMap<String, Integer> frequencyMap = new TreeMap<String, Integer>();
-        TreeMap<String, List<AbstractMap.SimpleEntry<Integer,LocalDateTime>>> frequencyByDate = new TreeMap<String, List<AbstractMap.SimpleEntry<Integer,LocalDateTime>>>();
-
-        //This field will map a class to its frequency of change
-        Integer ticketCount = 0;
-        String prevTicket = null;
-        PrintWriter writer = new PrintWriter(config.finalOutTable);
-
-
-        File file = new File(config.outReqFile);
-        File reqSims = new File(config.reqSimilarity);
-        File codeSims = new File(config.codeSimilarity);
-
-        BufferedReader reader = null;
-        BufferedReader reqSimReader = new BufferedReader(new FileReader(reqSims));
-        BufferedReader codeSimReader = new BufferedReader(new FileReader(codeSims));
-
-        TreeMap<String, String> commitMap = new TreeMap<String, String>();
-        HashMap<String, Integer> headerMap = new HashMap<String, Integer>();
-        TreeMap<String, String> fileMap = CustomFileUtil.readFile(config.fileMap, "\\|\\|");
-        TreeMap<String, String> trimmedFileMap = new TreeMap<String, String>();
-
-        for (Map.Entry<String, String> entry : fileMap.entrySet()) {
-            trimmedFileMap.put(entry.getKey(), trimCustom(entry.getValue(), "org/apache"));
-            //change this to use a filter
-        }
-        System.out.println(fileMap.toString() + " file map");
-        System.out.println(trimmedFileMap.toString() + " trimmed file map");
-        reader = new BufferedReader(new FileReader(file));
-        String[] mainHeader = reader.readLine().split("|");
-        String[] vsmHeader = reqSimReader.readLine().split(",");
-        String[] codeSimHeader = codeSimReader.readLine().split(",");
-        String[] sonarHeader = config.sonarMetrics;
-
-        for (int i = 0; i < mainHeader.length; i++) {
-            headerMap.put(mainHeader[i], i);
-        }
-        String text = null;
-
-        String ckjmHeader = "ckjm_noc\tckjm_wmc\tckjm_rfc\tckjm_cbo\tckjm_dit\tckjm_lcom\tckjm_ca\tckjm_npm";
-
-        String HEADER = "Ticket\tLast 10\tFix Version\tIssue Type\tLast Commit Time\tReq Created\tCommits\tFile\tRequirement\tBugCount\tChangeHistory\t";
-        HEADER += String.join("\t", vsmHeader);
-        HEADER += "\t" + String.join("\t", codeSimHeader);
-        HEADER += "\t" + ckjmHeader;
-        //HEADER += "\tloc\t"; just got rid of this
-        HEADER += String.join("\t", sonarHeader) + "\t";
-        HEADER += "Changed?\n";
-
-        HashMap<String, Integer> header = getHeader(HEADER.replace("\t", ","));
-        writer.write(HEADER);
-
-        int count = 0;
-        while ((text = reader.readLine()) != null && (currentCodeLine = codeSimReader.readLine()) != null && (currentReqLine = reqSimReader.readLine()) != null) {
-            count++;
-            String[] line = text.replaceAll("\t", " ").split("\\|");
-            String fix = line[headerMap.get("Fix Version")];
-            String changed  = line[headerMap.get("Changed?")].trim();
-
-            ClassData currentFix = fixToClassData.get(fix);
-
-
-            if (!line[0].equals(prevTicket)) {
-                ticketCount++;
-            }
-            prevTicket = line[0];
-
-            String className = trimmedFileMap.get(line[7]);
-            Integer freq = frequencyMap.get(className) == null ? 0 : frequencyMap.get(className);
-            if (changed.equals("1")) {
-                frequencyMap.put(className, freq + 1);
-                if (frequencyByDate.get(className) == null)
-                    frequencyByDate.put(className, new ArrayList<AbstractMap.SimpleEntry<Integer, LocalDateTime>>());
-                List<AbstractMap.SimpleEntry<Integer, LocalDateTime>> dateFreqs = frequencyByDate.get(className);
-                LocalDateTime lastCommitTime = TextParser.parseDateString(line[headerMap.get("Last Commit Time")]);
-                dateFreqs.add(new AbstractMap.SimpleEntry<Integer, LocalDateTime>(ticketCount, lastCommitTime));
-                //System.out.println(line[0] + " " + line[7] + "freq increase");
-            }
-            int staticCount = 0; //fix this
-            double baseHistory = Math.min(1.0, freq / ticketCount);
-            double logHistory = HistoryCalculator.getLogHistory(ticketCount, frequencyByDate.get(className));
-            double wtHistory = HistoryCalculator.getWeightedHistory(ticketCount, frequencyByDate.get(className));
-
-            String last10 = line[1].replaceAll(",", " ");
-            String firstFields = String.format("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%.5f\t", line[0], last10, line[2].replaceAll(",", "|"), line[3], line[4], line[5], line[6], line[7], line[8], staticCount, baseHistory);
-
-
-            ClassMetrics cm = currentFix.getCkjmMetrics().get(className.replaceAll(".java", "").replaceAll("/", "."));
-            Integer loc = currentFix.getLinesOfCode().get(className);
-            //System.out.println(className);
-            String ckjmMetrics = "";
-            if (cm != null) {
-                ckjmMetrics += String.format("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d", cm.getNoc(),
-                        cm.getWmc(), cm.getRfc(), cm.getCbo(), cm.getDit(), cm.getLcom(), cm.getCa(), cm.getNpm());
-
-            }
-            else {
-                //"ckjm_noc\tckjm_wmc\tckjm_rfc\tckjm_cbo\tckjm_dit\tckjm_lcom\tckjm_ca\tckjm_npm";
-                ckjmMetrics += "-1\t-1\t-1\t-1\t-1\t-1\t-1\t-1";
-            }
-            ckjmMetrics += String.format("\t%d", loc != null ? loc : -1);
-            String[] reqs = currentReqLine.split(",");
-            for (int i = 0; i < reqs.length; i++) {
-                firstFields += String.format("%s\t", reqs[i]);
-            }
-            for (String codeSim : currentCodeLine.split(",")) {
-                firstFields += String.format("%s\t", codeSim);
-            }
-            firstFields += ckjmMetrics;
-            firstFields +=String.format("\t%s\n", line[9].equals("1") ? "y" : "n");
-            /*
-            Vsm_MaxSimilarity,Vsm_AverSimilarity,Jsd_MaxSimilarity,Jsd_AverSimilarity,CmJcn_MaxSimilarity,CmJcn_AverSimilarity,GreedyRes_MaxSimilarity,GreedyRes_AverSimilarity,BleuLinMaxSimilarity,BleuLin_AverSimilarity,OptWup_MaxSimilarity,OptWup_AverSimilarity
-             */
-            //Ticket|Last 10|Fix Version|Issue Type|Last Commit Time|Req Created|Commits|File|Requirement|BugCount|ChangeHistory|Changed?
-            if (trimmedFileMap.get(line[7]).contains("qpid") && loc != null && loc > 0 && cm != null) {
-                writer.write(firstFields);
-            }
-        }
-        writer.flush();
-        writer.close();
-    }
 
 
     public void convertArff(String file) throws Exception {

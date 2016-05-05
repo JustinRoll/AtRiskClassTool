@@ -5,9 +5,10 @@ import sun.security.krb5.internal.Ticket;
 
 import java.io.Serializable;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.TreeMap;
+import java.util.*;
+import java.util.stream.Collectors;
+
+import static com.jroll.util.CustomFileUtil.getExtension;
 
 /**
  * Created by jroll on 11/4/15.
@@ -27,6 +28,18 @@ public class Requirement implements Serializable {
     public Requirement () {
 
     }
+
+    public HashSet<String> getChangedFiles() {
+        HashSet<String> changedFiles = new HashSet<String>();
+        for (GitMetadata meta : gitMetadatas) {
+            for (String fName : meta.getChangedFiles()) {
+                changedFiles.add(fName);
+            }
+        }
+        return changedFiles;
+    }
+
+
 
     public String getId() {
         return id;
@@ -52,8 +65,13 @@ public class Requirement implements Serializable {
         this.gitMetadatas = gitMetadatas;
     }
 
-    public ArrayList<String> getCurrentFilesInRepo() {
-        return currentFilesInRepo;
+    public HashSet<String> getCurrentFilesInRepo(String extension) {
+        HashSet<String> allFiles = new HashSet<String>();
+        for (GitMetadata meta: this.gitMetadatas) {
+            List<String> files = meta.getAllFiles().stream().filter(f -> extension.equals(getExtension(f).toLowerCase())).collect(Collectors.toList());
+            allFiles.addAll(files);
+        }
+        return allFiles;
     }
 
     public void setCurrentFilesInRepo(ArrayList<String> currentFilesInRepo) {
